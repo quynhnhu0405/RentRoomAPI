@@ -24,5 +24,18 @@ const PostSchema = new mongoose.Schema(
   },
   { timestamps: true } // timestamps tự động tạo createdAt & updatedAt
 );
+// Virtual cho package
+PostSchema.virtual('packageDetails', {
+  ref: 'Package',
+  localField: 'package',
+  foreignField: '_id',
+  justOne: true
+});
 
+// Virtual cho utilities (nếu cần chi tiết)
+PostSchema.virtual('utilityDetails', {
+  ref: 'Utilities',
+  localField: 'utilities',
+  foreignField: '_id'
+});
 module.exports = mongoose.model("Post", PostSchema);
