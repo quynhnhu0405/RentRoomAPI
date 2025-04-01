@@ -21,8 +21,22 @@ const PostSchema = new mongoose.Schema(
     landlordId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: { type: String, enum: ["waiting", "available", "expired"], default: "waiting" },
     package: [{ type: mongoose.Schema.Types.ObjectId, ref: "Package" }],
+    expiryDate: { type: Date, required: true },
   },
   { timestamps: true } // timestamps tự động tạo createdAt & updatedAt
 );
+// Virtual cho package
+PostSchema.virtual('packageDetails', {
+  ref: 'Package',
+  localField: 'package',
+  foreignField: '_id',
+  justOne: true
+});
 
+// Virtual cho utilities (nếu cần chi tiết)
+PostSchema.virtual('utilityDetails', {
+  ref: 'Utilities',
+  localField: 'utilities',
+  foreignField: '_id'
+});
 module.exports = mongoose.model("Post", PostSchema);
