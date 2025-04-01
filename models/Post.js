@@ -21,6 +21,7 @@ const PostSchema = new mongoose.Schema(
     landlordId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: { type: String, enum: ["waiting", "available", "expired"], default: "waiting" },
     package: [{ type: mongoose.Schema.Types.ObjectId, ref: "Package" }],
+    expiryDate: { type: Date, required: true },
   },
   { timestamps: true } // timestamps tự động tạo createdAt & updatedAt
 );

@@ -31,40 +31,6 @@ router.get("/", async (req, res) => {
       res.status(500).json({ error: "Lỗi khi tìm bài" });
   }
 });
-router.patch('/check-expired-posts', async (req, res) => {
-  try {
-    const now = new Date();
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); // 1 giờ trước
-    
-    // Tìm các bài đăng đã hết hạn trong vòng 1 giờ qua
-    const expiredPosts = await Post.find({
-      status: 'available',
-      expiryDate: { 
-        $gte: oneHourAgo,
-        $lt: now
-      }
-    });
-    
-    // Cập nhật trạng thái
-    const postIds = expiredPosts.map(post => post._id);
-    await Post.updateMany(
-      { _id: { $in: postIds } },
-      { $set: { status: 'expired' } }
-    );
-    
-    res.json({
-      success: true,
-      expiredCount: postIds.length,
-      message: `Đã cập nhật ${postIds.length} bài đăng hết hạn`
-    });
-  } catch (error) {
-    console.error('Error checking expired posts:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi khi kiểm tra bài đăng hết hạn'
-    });
-  }
-});
 router.get("/phong-tro", async (req, res) => {
     try {
       const posts = await Post.find({
@@ -152,25 +118,27 @@ router.get("/o-ghep", async (req, res) => {
         });
       }
 });
-router.patch("/:id", async (req, res) => {
+router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-
-    // Validate ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "ID không hợp lệ" });
+    const validStatuses = ['available', 'approved', 'rejected', 'deleted'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
     }
-
-    // Validate status
-    const allowedStatuses = ["approved", "rejected", "available", "deleted"];
-    if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({ error: `Trạng thái phải là một trong: ${allowedStatuses.join(", ")}` });
+    const updatedPost = await Post.findByIdAndUpdate(
+      id,
+      { status, updatedAt: new Date() },
+      { new: true }
+    );
+    if (!updatedPost) {
+      return res.status(404).json({ message: 'Post not found' });
     }
-
-    // Rest of your logic...
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    
+    res.json(updatedPost);
+  } catch (error) {
+    console.error('Error updating post:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 module.exports = router;
