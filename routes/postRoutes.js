@@ -494,4 +494,50 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
   }
 });
 
+router.patch('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const validStatuses = ['available', 'approved', 'rejected', 'deleted'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+    const updatedPost = await Post.findByIdAndUpdate(
+      id,
+      { status, updatedAt: new Date() },
+      { new: true }
+    );
+    if (!updatedPost) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    res.json(updatedPost);
+  } catch (error) {
+    console.error('Error updating post:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.get('/count',authAdmin, async (req, res) => {
+  try {
+    const count = await Post.countDocuments();
+    res.json({ total: count });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/latest-posts', async (req, res) => {
+  try {
+    const latestPosts = await Post.find()
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .populate('category', 'name')
+      .populate('landlordId', 'name');
+      
+    res.json(latestPosts);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 module.exports = router;
