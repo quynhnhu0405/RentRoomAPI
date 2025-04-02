@@ -351,6 +351,7 @@ router.post("/", auth, async (req, res) => {
       utilities,
       images,
       package,
+      expiryDate,
     } = req.body;
 
     // Kiểm tra category
@@ -371,6 +372,8 @@ router.post("/", auth, async (req, res) => {
       images,
       landlordId: req.user._id,
       package,
+      expiryDate,
+      paid: false, // Mặc định là chưa thanh toán
       status: "waiting", // Mặc định là đang chờ duyệt
     });
 
