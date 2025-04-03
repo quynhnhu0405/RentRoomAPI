@@ -196,7 +196,7 @@ router.get("/completed-total", async (req, res) => {
 });
 
 // Lấy doanh thu 6 tháng gần nhất
-router.get("/monthly-revenue",authAdmin, async (req, res) => {
+router.get("/monthly-revenue", async (req, res) => {
   try {
     // Tạo mảng 6 tháng gần nhất
     const months = [];

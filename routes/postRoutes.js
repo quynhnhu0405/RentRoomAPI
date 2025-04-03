@@ -24,6 +24,30 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get('/latest-posts', async (req, res) => {
+  try {
+    // Fetch the latest posts without any ID validation
+    const latestPosts = await Post.find()
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .populate('category', 'name')
+      .populate('landlordId', 'name');
+      
+    res.json(latestPosts);
+  } catch (err) {
+    // Just return the error message directly, no ID validation here
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  }
+});
+router.get('/count', async (req, res) => {
+  try {
+    const count = await Post.countDocuments();
+    res.json({ total: count });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 // API lấy danh sách phòng trọ
 router.get("/phong-tro", async (req, res) => {
   try {
@@ -400,7 +424,7 @@ router.get("/:id", async (req, res) => {
       .populate("utilityDetails", "name")
       .populate({
         path: "landlordId",
-        select: "name phone",
+        select: "name phone avatar createAt",
       })
       .lean();
 
@@ -419,7 +443,6 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
-
     // Validate ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "ID không hợp lệ" });
@@ -521,26 +544,7 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-router.get('/count',authAdmin, async (req, res) => {
-  try {
-    const count = await Post.countDocuments();
-    res.json({ total: count });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
 
-router.get('/latest-posts', async (req, res) => {
-  try {
-    const latestPosts = await Post.find()
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .populate('category', 'name')
-      .populate('landlordId', 'name');
-      
-    res.json(latestPosts);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+
+
 module.exports = router;
