@@ -48,6 +48,39 @@ router.get('/count', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+//API lấy các bài đăng của 1 users
+router.get("/user/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params; // Sửa từ id thành userId để nhất quán
+    
+    // Validate userId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    // Lấy tất cả bài post của user
+    const posts = await Post.find({ landlordId: userId })
+      .populate('category', 'name') // Lấy thêm tên category
+      .populate("packageDetails", "name")
+      .populate('utilityDetails', 'name')  // Lấy thêm tên các tiện ích
+      .sort({ createdAt: -1 })       // Sắp xếp theo thời gian tạo mới nhất
+      .lean();
+
+    res.json({
+      success: true,
+      data: posts,
+      count: posts.length
+    });
+
+  } catch (error) {
+    console.error('Error getting posts by user:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error while getting posts',
+      message: error.message // Thêm thông báo lỗi chi tiết
+    });
+  }
+});
 // API lấy danh sách phòng trọ
 router.get("/phong-tro", async (req, res) => {
   try {

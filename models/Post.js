@@ -29,8 +29,7 @@ const PostSchema = new mongoose.Schema(
 PostSchema.virtual('packageDetails', {
   ref: 'Package',
   localField: 'package',
-  foreignField: '_id',
-  justOne: true
+  foreignField: '_id'
 });
 
 // Virtual cho utilities (nếu cần chi tiết)
