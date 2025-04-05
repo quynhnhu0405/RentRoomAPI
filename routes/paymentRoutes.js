@@ -245,26 +245,5 @@ router.get("/monthly-revenue", async (req, res) => {
     res.status(500).json({ message: "Lỗi khi lấy dữ liệu doanh thu" });
   }
 });
-//Lấy payment theo userId
-router.get("/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    const payments = await Payment.find({ landlordId: userId })
-      .populate({
-        path: "PostId",
-        select: "title",
-      });
-
-    if (!payments || payments.length === 0) {
-      return res.status(404).json({ message: "No payments found for this user" });
-    }
-
-    res.json(payments);
-  } catch (error) {
-    console.error("Error getting payments:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
 
 module.exports = router;
