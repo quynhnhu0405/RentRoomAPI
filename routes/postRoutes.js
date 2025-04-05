@@ -24,15 +24,15 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get('/latest-posts', async (req, res) => {
+router.get("/latest-posts", async (req, res) => {
   try {
     // Fetch the latest posts without any ID validation
     const latestPosts = await Post.find()
       .sort({ createdAt: -1 })
       .limit(8)
-      .populate('category', 'name')
-      .populate('landlordId', 'name');
-      
+      .populate("category", "name")
+      .populate("landlordId", "name");
+
     res.json(latestPosts);
   } catch (err) {
     // Just return the error message directly, no ID validation here
@@ -40,7 +40,7 @@ router.get('/latest-posts', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-router.get('/count', async (req, res) => {
+router.get("/count", async (req, res) => {
   try {
     const count = await Post.countDocuments();
     res.json({ total: count });
@@ -52,32 +52,31 @@ router.get('/count', async (req, res) => {
 router.get("/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params; // Sửa từ id thành userId để nhất quán
-    
+
     // Validate userId
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
+      return res.status(400).json({ error: "Invalid user ID" });
     }
 
     // Lấy tất cả bài post của user
     const posts = await Post.find({ landlordId: userId })
-      .populate('category', 'name') // Lấy thêm tên category
+      .populate("category", "name") // Lấy thêm tên category
       .populate("packageDetails", "name")
-      .populate('utilityDetails', 'name')  // Lấy thêm tên các tiện ích
-      .sort({ createdAt: -1 })       // Sắp xếp theo thời gian tạo mới nhất
+      .populate("utilityDetails", "name") // Lấy thêm tên các tiện ích
+      .sort({ createdAt: -1 }) // Sắp xếp theo thời gian tạo mới nhất
       .lean();
 
     res.json({
       success: true,
       data: posts,
-      count: posts.length
+      count: posts.length,
     });
-
   } catch (error) {
-    console.error('Error getting posts by user:', error);
-    res.status(500).json({ 
+    console.error("Error getting posts by user:", error);
+    res.status(500).json({
       success: false,
-      error: 'Server error while getting posts',
-      message: error.message // Thêm thông báo lỗi chi tiết
+      error: "Server error while getting posts",
+      message: error.message, // Thêm thông báo lỗi chi tiết
     });
   }
 });
@@ -451,7 +450,7 @@ router.get("/:id", async (req, res) => {
       return res.status(400).json({ error: "ID không hợp lệ" });
     }
 
-    const post = await Post.findById(id)
+    const post = await Post.findOne({ _id: id, isVisible: true })
       .populate("packageDetails", "name priceday priceweek pricemonth level")
       .populate("utilityDetails", "name")
       .populate({
@@ -479,7 +478,6 @@ router.put("/:id", auth, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "ID không hợp lệ" });
     }
-
     // Tìm bài đăng
     const post = await Post.findById(id);
     if (!post) {
@@ -511,7 +509,8 @@ router.put("/:id", auth, async (req, res) => {
 });
 
 // API admin phê duyệt/từ chối bài đăng
-router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
+// PATCH /api/posts/:id/status
+router.patch("/admin/:id/status", authAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, expiryDate } = req.body;
@@ -522,20 +521,21 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
     }
 
     // Validate status
-    const allowedStatuses = ["unpaid", "available", "waiting", "expired"];
+    const allowedStatuses = [
+      "unpaid",
+      "available",
+      "waiting",
+      "expired",
+      "rejected",
+    ];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         error: `Trạng thái phải là một trong: ${allowedStatuses.join(", ")}`,
       });
     }
 
-    // Cập nhật trạng thái bài đăng
     const updateData = { status };
-
-    // Nếu có ngày hết hạn, thêm vào dữ liệu cập nhật
-    if (expiryDate) {
-      updateData.expiryDate = new Date(expiryDate);
-    }
+    if (expiryDate) updateData.expiryDate = new Date(expiryDate);
 
     const updatedPost = await Post.findByIdAndUpdate(id, updateData, {
       new: true,
@@ -552,29 +552,25 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
   }
 });
 
-router.patch('/:id', async (req, res) => {
+// API ẩn bài đăng (yêu cầu đăng nhập và là chủ bài đăng hoặc admin)
+router.delete("/:id",auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    const validStatuses = ['unpaid' ,'waiting', 'available', 'expired'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
-    }
+    
     const updatedPost = await Post.findByIdAndUpdate(
       id,
-      { status, updatedAt: new Date() },
-      { new: true }
+      { isVisible: false }, // Chỉ cập nhật trường isVisible
+      { new: true } // Trả về bài đăng sau khi cập nhật
     );
+    // Kiểm tra xem bài đăng có tồn tại không
     if (!updatedPost) {
-      return res.status(404).json({ message: 'Post not found' });
+      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
     }
-    
-    res.json(updatedPost);
+
+    return res.status(200).json(); 
   } catch (error) {
-    console.error('Error updating post:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error("Lỗi khi cập nhật bài đăng:", error);
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 });
-
-
 module.exports = router;
