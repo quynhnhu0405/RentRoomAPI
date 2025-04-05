@@ -9,7 +9,7 @@ const moment = require("moment");
 const router = express.Router();
 
 // API Tạo thanh toán mới
-router.post("/", auth, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { postId, packageId, duration } = req.body;
 
@@ -23,12 +23,6 @@ router.post("/", auth, async (req, res) => {
       return res
         .status(403)
         .json({ message: "Bạn không có quyền thanh toán cho bài đăng này" });
-    }
-
-    // Lấy thông tin gói
-    const packageInfo = await Package.findById(packageId);
-    if (!packageInfo) {
-      return res.status(404).json({ message: "Không tìm thấy gói dịch vụ" });
     }
 
     // Tính toán giá tiền dựa trên thời hạn
@@ -196,7 +190,7 @@ router.get("/completed-total", async (req, res) => {
 });
 
 // Lấy doanh thu 6 tháng gần nhất
-router.get("/monthly-revenue",authAdmin, async (req, res) => {
+router.get("/monthly-revenue", async (req, res) => {
   try {
     // Tạo mảng 6 tháng gần nhất
     const months = [];

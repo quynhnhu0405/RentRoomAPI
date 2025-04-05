@@ -24,6 +24,63 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get('/latest-posts', async (req, res) => {
+  try {
+    // Fetch the latest posts without any ID validation
+    const latestPosts = await Post.find()
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .populate('category', 'name')
+      .populate('landlordId', 'name');
+      
+    res.json(latestPosts);
+  } catch (err) {
+    // Just return the error message directly, no ID validation here
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  }
+});
+router.get('/count', async (req, res) => {
+  try {
+    const count = await Post.countDocuments();
+    res.json({ total: count });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+//API lấy các bài đăng của 1 users
+router.get("/user/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params; // Sửa từ id thành userId để nhất quán
+    
+    // Validate userId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    // Lấy tất cả bài post của user
+    const posts = await Post.find({ landlordId: userId })
+      .populate('category', 'name') // Lấy thêm tên category
+      .populate("packageDetails", "name")
+      .populate('utilityDetails', 'name')  // Lấy thêm tên các tiện ích
+      .sort({ createdAt: -1 })       // Sắp xếp theo thời gian tạo mới nhất
+      .lean();
+
+    res.json({
+      success: true,
+      data: posts,
+      count: posts.length
+    });
+
+  } catch (error) {
+    console.error('Error getting posts by user:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error while getting posts',
+      message: error.message // Thêm thông báo lỗi chi tiết
+    });
+  }
+});
 // API lấy danh sách phòng trọ
 router.get("/phong-tro", async (req, res) => {
   try {
@@ -373,8 +430,7 @@ router.post("/", auth, async (req, res) => {
       landlordId: req.user._id,
       package,
       expiryDate,
-      paid: false, // Mặc định là chưa thanh toán
-      status: "waiting", // Mặc định là đang chờ duyệt
+      status: "unpaid", // Mặc định là chưa thanh toán
     });
 
     await newPost.save();
@@ -400,7 +456,7 @@ router.get("/:id", async (req, res) => {
       .populate("utilityDetails", "name")
       .populate({
         path: "landlordId",
-        select: "name phone",
+        select: "name phone avatar createAt",
       })
       .lean();
 
@@ -419,7 +475,6 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
-
     // Validate ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "ID không hợp lệ" });
@@ -467,7 +522,7 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
     }
 
     // Validate status
-    const allowedStatuses = ["available", "waiting", "expired"];
+    const allowedStatuses = ["unpaid", "available", "waiting", "expired"];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         error: `Trạng thái phải là một trong: ${allowedStatuses.join(", ")}`,
@@ -501,7 +556,7 @@ router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const validStatuses = ['available', 'approved', 'rejected', 'deleted'];
+    const validStatuses = ['unpaid' ,'waiting', 'available', 'expired'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
@@ -521,26 +576,5 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-router.get('/count',authAdmin, async (req, res) => {
-  try {
-    const count = await Post.countDocuments();
-    res.json({ total: count });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
 
-router.get('/latest-posts', async (req, res) => {
-  try {
-    const latestPosts = await Post.find()
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .populate('category', 'name')
-      .populate('landlordId', 'name');
-      
-    res.json(latestPosts);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
 module.exports = router;
