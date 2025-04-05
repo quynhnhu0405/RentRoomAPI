@@ -430,8 +430,7 @@ router.post("/", auth, async (req, res) => {
       landlordId: req.user._id,
       package,
       expiryDate,
-      paid: false, // Mặc định là chưa thanh toán
-      status: "waiting", // Mặc định là đang chờ duyệt
+      status: "unpaid", // Mặc định là chưa thanh toán
     });
 
     await newPost.save();
@@ -523,7 +522,7 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
     }
 
     // Validate status
-    const allowedStatuses = ["available", "waiting", "expired"];
+    const allowedStatuses = ["unpaid", "available", "waiting", "expired"];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         error: `Trạng thái phải là một trong: ${allowedStatuses.join(", ")}`,
@@ -557,7 +556,7 @@ router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const validStatuses = ['available', 'approved', 'rejected', 'deleted'];
+    const validStatuses = ['unpaid' ,'waiting', 'available', 'expired'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
@@ -576,8 +575,6 @@ router.patch('/:id', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
-
-
 
 
 module.exports = router;

@@ -9,7 +9,7 @@ const moment = require("moment");
 const router = express.Router();
 
 // API Tạo thanh toán mới
-router.post("/", auth, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { postId, packageId, duration } = req.body;
 
@@ -23,12 +23,6 @@ router.post("/", auth, async (req, res) => {
       return res
         .status(403)
         .json({ message: "Bạn không có quyền thanh toán cho bài đăng này" });
-    }
-
-    // Lấy thông tin gói
-    const packageInfo = await Package.findById(packageId);
-    if (!packageInfo) {
-      return res.status(404).json({ message: "Không tìm thấy gói dịch vụ" });
     }
 
     // Tính toán giá tiền dựa trên thời hạn
@@ -249,6 +243,27 @@ router.get("/monthly-revenue", async (req, res) => {
   } catch (err) {
     console.error("Error fetching monthly revenue:", err);
     res.status(500).json({ message: "Lỗi khi lấy dữ liệu doanh thu" });
+  }
+});
+//Lấy payment theo userId
+router.get("/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const payments = await Payment.find({ landlordId: userId })
+      .populate({
+        path: "PostId",
+        select: "title",
+      });
+
+    if (!payments || payments.length === 0) {
+      return res.status(404).json({ message: "No payments found for this user" });
+    }
+
+    res.json(payments);
+  } catch (error) {
+    console.error("Error getting payments:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 

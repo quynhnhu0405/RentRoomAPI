@@ -10,9 +10,13 @@ const paymentRoutes = require("./routes/paymentRoutes");
 require("dotenv").config();
 
 const app = express();
-app.use(express.json());
 app.use(cors());
 
+// Increase JSON payload limit (for PUT/POST requests)
+app.use(express.json({ limit: '10mb' })); // Adjust the limit as needed
+
+// If you're using URL-encoded data
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Kết nối MongoDB
 connectDB();
 
