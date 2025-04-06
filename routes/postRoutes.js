@@ -605,6 +605,16 @@ router.delete("/:id", auth, async (req, res) => {
         .json({ message: "Không có quyền cập nhật bài đăng này" });
     }
 
+    // Kiểm tra quyền (phải là chủ bài đăng hoặc admin)
+    if (
+      updatedPost.landlordId.toString() !== req.user._id.toString() &&
+      req.user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Không có quyền cập nhật bài đăng này" });
+    }
+
     return res.status(200).json();
   } catch (error) {
     console.error("Lỗi khi cập nhật bài đăng:", error);
