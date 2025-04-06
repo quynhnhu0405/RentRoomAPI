@@ -29,7 +29,7 @@ const PostSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["unpaid", "waiting", "available", "expired"],
+      enum: ["unpaid", "waiting", "available", "expired", "rejected"],
       default: "unpaid",
     },
     package: [
@@ -38,7 +38,9 @@ const PostSchema = new mongoose.Schema(
         period: { type: String, enum: ["day", "week", "month"] },
         quantity: { type: Number },
       },
+    
     ],
+    isVisible: { type: Boolean, default: true },
     expiryDate: { type: Date, required: true },
   },
   { timestamps: true } // timestamps tự động tạo createdAt & updatedAt

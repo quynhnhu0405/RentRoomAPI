@@ -475,7 +475,7 @@ router.get("/:id", async (req, res) => {
       return res.status(400).json({ error: "ID không hợp lệ" });
     }
 
-    const post = await Post.findById(id)
+    const post = await Post.findOne({ _id: id, isVisible: true })
       .populate("packageDetails", "name priceday priceweek pricemonth level")
       .populate("utilityDetails", "name")
       .populate({
@@ -503,7 +503,6 @@ router.put("/:id", auth, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "ID không hợp lệ" });
     }
-
     // Tìm bài đăng
     const post = await Post.findById(id);
     if (!post) {
@@ -535,7 +534,8 @@ router.put("/:id", auth, async (req, res) => {
 });
 
 // API admin phê duyệt/từ chối bài đăng
-router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
+// PATCH /api/posts/:id/status
+router.patch("/admin/:id/status", authAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, expiryDate } = req.body;
@@ -546,20 +546,21 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
     }
 
     // Validate status
-    const allowedStatuses = ["unpaid", "available", "waiting", "expired"];
+    const allowedStatuses = [
+      "unpaid",
+      "available",
+      "waiting",
+      "expired",
+      "rejected",
+    ];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         error: `Trạng thái phải là một trong: ${allowedStatuses.join(", ")}`,
       });
     }
 
-    // Cập nhật trạng thái bài đăng
     const updateData = { status };
-
-    // Nếu có ngày hết hạn, thêm vào dữ liệu cập nhật
-    if (expiryDate) {
-      updateData.expiryDate = new Date(expiryDate);
-    }
+    if (expiryDate) updateData.expiryDate = new Date(expiryDate);
 
     const updatedPost = await Post.findByIdAndUpdate(id, updateData, {
       new: true,
@@ -576,80 +577,25 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
   }
 });
 
-router.patch("/:id", async (req, res) => {
+
+// API ẩn bài đăng (yêu cầu đăng nhập và là chủ bài đăng hoặc admin)
+router.delete("/:id",auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    const validStatuses = ["unpaid", "waiting", "available", "expired"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Invalid status" });
-    }
     const updatedPost = await Post.findByIdAndUpdate(
       id,
-      { status, updatedAt: new Date() },
-      { new: true }
+      { isVisible: false }, // Chỉ cập nhật trường isVisible
+      { new: true } // Trả về bài đăng sau khi cập nhật
     );
+    // Kiểm tra xem bài đăng có tồn tại không
     if (!updatedPost) {
-      return res.status(404).json({ message: "Post not found" });
-    }
-
-    res.json(updatedPost);
-  } catch (error) {
-    console.error("Error updating post:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// API Gia hạn bài đăng (yêu cầu đăng nhập)
-router.post("/renew", auth, async (req, res) => {
-  try {
-    const { postId, package, expiryDate, totalPrice } = req.body;
-
-    // Validate postId
-    if (!mongoose.Types.ObjectId.isValid(postId)) {
-      return res.status(400).json({ error: "ID bài đăng không hợp lệ" });
-    }
-
-    // Find the post
-    const post = await Post.findById(postId);
-    if (!post) {
       return res.status(404).json({ message: "Không tìm thấy bài đăng" });
     }
 
-    // Check if user is the owner of the post
-    if (post.landlordId.toString() !== req.user._id.toString()) {
-      return res
-        .status(403)
-        .json({ message: "Bạn không có quyền gia hạn bài đăng này" });
-    }
-
-    // Update post with new package and expiry date
-    post.package = package;
-    post.expiryDate = expiryDate;
-    post.status = "unpaid"; // Reset to unpaid until payment is approved
-    await post.save();
-
-    // Create payment record for renewal
-    const newPayment = new Payment({
-      PostId: postId,
-      landlordId: req.user._id,
-      total: totalPrice || 0,
-      status: "pending", // Payment starts as pending and will be approved by admin
-    });
-
-    await newPayment.save();
-
-    res.status(200).json({
-      post,
-      payment: newPayment,
-      message: "Gia hạn bài đăng thành công, thanh toán đang chờ xác nhận",
-    });
+    return res.status(200).json(); 
   } catch (error) {
-    console.error("Lỗi khi gia hạn bài đăng:", error);
-    res
-      .status(500)
-      .json({ error: "Lỗi khi gia hạn bài đăng", details: error.message });
+    console.error("Lỗi khi cập nhật bài đăng:", error);
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 });
-
 module.exports = router;
