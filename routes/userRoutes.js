@@ -146,23 +146,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// API Lấy thông tin user theo ID
-router.get("/user/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await User.findById(id).select("-password");
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json(user);
-  } catch (error) {
-    res.status(500).json({ error: "Lỗi server" });
-  }
-});
-
-// 🟢 Lấy thông tin một user theo ID
+//Lấy thông tin một user theo ID
 router.get("/user/:id", async (req, res) => {
     try {
         const { id } = req.params;
@@ -171,7 +155,7 @@ router.get("/user/:id", async (req, res) => {
             return res.status(400).json({ error: "ID không hợp lệ" });
         }
 
-        const user = await User.findById(id);
+        const user = await User.findById(id).select("-password");
         if (!user) {
             return res.status(404).json({ error: "User không tồn tại" });
         }
@@ -255,4 +239,5 @@ router.get('/count', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
 module.exports = router;
