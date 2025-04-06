@@ -2,7 +2,9 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Post = require("../models/Post");
 const Category = require("../models/Category");
+const Payment = require("../models/Payment");
 const { auth, authAdmin } = require("../middleware/auth");
+const Package = require("../models/Package");
 
 const router = express.Router();
 
@@ -24,15 +26,15 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get('/latest-posts', async (req, res) => {
+router.get("/latest-posts", async (req, res) => {
   try {
     // Fetch the latest posts without any ID validation
     const latestPosts = await Post.find()
       .sort({ createdAt: -1 })
       .limit(8)
-      .populate('category', 'name')
-      .populate('landlordId', 'name');
-      
+      .populate("category", "name")
+      .populate("landlordId", "name");
+
     res.json(latestPosts);
   } catch (err) {
     // Just return the error message directly, no ID validation here
@@ -40,7 +42,7 @@ router.get('/latest-posts', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-router.get('/count', async (req, res) => {
+router.get("/count", async (req, res) => {
   try {
     const count = await Post.countDocuments();
     res.json({ total: count });
@@ -52,32 +54,31 @@ router.get('/count', async (req, res) => {
 router.get("/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params; // Sửa từ id thành userId để nhất quán
-    
+
     // Validate userId
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
+      return res.status(400).json({ error: "Invalid user ID" });
     }
 
     // Lấy tất cả bài post của user
     const posts = await Post.find({ landlordId: userId })
-      .populate('category', 'name') // Lấy thêm tên category
+      .populate("category", "name") // Lấy thêm tên category
       .populate("packageDetails", "name")
-      .populate('utilityDetails', 'name')  // Lấy thêm tên các tiện ích
-      .sort({ createdAt: -1 })       // Sắp xếp theo thời gian tạo mới nhất
+      .populate("utilityDetails", "name") // Lấy thêm tên các tiện ích
+      .sort({ createdAt: -1 }) // Sắp xếp theo thời gian tạo mới nhất
       .lean();
 
     res.json({
       success: true,
       data: posts,
-      count: posts.length
+      count: posts.length,
     });
-
   } catch (error) {
-    console.error('Error getting posts by user:', error);
-    res.status(500).json({ 
+    console.error("Error getting posts by user:", error);
+    res.status(500).json({
       success: false,
-      error: 'Server error while getting posts',
-      message: error.message // Thêm thông báo lỗi chi tiết
+      error: "Server error while getting posts",
+      message: error.message, // Thêm thông báo lỗi chi tiết
     });
   }
 });
@@ -417,6 +418,8 @@ router.post("/", auth, async (req, res) => {
       return res.status(400).json({ message: "Danh mục không tồn tại" });
     }
 
+    const packageExists = await Package.findById(package[0].id);
+
     // Tạo bài đăng mới với landlordId là ID của user đang đăng nhập
     const newPost = new Post({
       title,
@@ -434,10 +437,31 @@ router.post("/", auth, async (req, res) => {
     });
 
     await newPost.save();
-    res.status(201).json(newPost);
+    const totalPrice = packageExists
+      ? packageExists[`price${package[0].period}`] * package[0].quantity
+      : 0;
+
+    // Automatically create a payment record in pending status
+    const newPayment = new Payment({
+      PostId: newPost._id,
+      landlordId: req.user._id,
+      total: totalPrice, // Use the provided total price or default to 0
+      status: "pending", // Payment starts as pending and will be approved by admin
+    });
+
+    await newPayment.save();
+
+    // Return both the post and payment information
+    res.status(201).json({
+      post: newPost,
+      payment: newPayment,
+      message: "Bài đăng đã được tạo, thanh toán đang chờ xác nhận",
+    });
   } catch (error) {
     console.error("Lỗi khi tạo bài đăng:", error);
-    res.status(500).json({ error: "Lỗi khi tạo bài đăng" });
+    res
+      .status(500)
+      .json({ error: "Lỗi khi tạo bài đăng", details: error.message });
   }
 });
 
@@ -552,13 +576,13 @@ router.patch("/admin/:id/approve", authAdmin, async (req, res) => {
   }
 });
 
-router.patch('/:id', async (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const validStatuses = ['unpaid' ,'waiting', 'available', 'expired'];
+    const validStatuses = ["unpaid", "waiting", "available", "expired"];
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
+      return res.status(400).json({ message: "Invalid status" });
     }
     const updatedPost = await Post.findByIdAndUpdate(
       id,
@@ -566,15 +590,66 @@ router.patch('/:id', async (req, res) => {
       { new: true }
     );
     if (!updatedPost) {
-      return res.status(404).json({ message: 'Post not found' });
+      return res.status(404).json({ message: "Post not found" });
     }
-    
+
     res.json(updatedPost);
   } catch (error) {
-    console.error('Error updating post:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error("Error updating post:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
+// API Gia hạn bài đăng (yêu cầu đăng nhập)
+router.post("/renew", auth, async (req, res) => {
+  try {
+    const { postId, package, expiryDate, totalPrice } = req.body;
+
+    // Validate postId
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      return res.status(400).json({ error: "ID bài đăng không hợp lệ" });
+    }
+
+    // Find the post
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
+    }
+
+    // Check if user is the owner of the post
+    if (post.landlordId.toString() !== req.user._id.toString()) {
+      return res
+        .status(403)
+        .json({ message: "Bạn không có quyền gia hạn bài đăng này" });
+    }
+
+    // Update post with new package and expiry date
+    post.package = package;
+    post.expiryDate = expiryDate;
+    post.status = "unpaid"; // Reset to unpaid until payment is approved
+    await post.save();
+
+    // Create payment record for renewal
+    const newPayment = new Payment({
+      PostId: postId,
+      landlordId: req.user._id,
+      total: totalPrice || 0,
+      status: "pending", // Payment starts as pending and will be approved by admin
+    });
+
+    await newPayment.save();
+
+    res.status(200).json({
+      post,
+      payment: newPayment,
+      message: "Gia hạn bài đăng thành công, thanh toán đang chờ xác nhận",
+    });
+  } catch (error) {
+    console.error("Lỗi khi gia hạn bài đăng:", error);
+    res
+      .status(500)
+      .json({ error: "Lỗi khi gia hạn bài đăng", details: error.message });
+  }
+});
 
 module.exports = router;

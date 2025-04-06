@@ -9,70 +9,49 @@ const moment = require("moment");
 const router = express.Router();
 
 // API Tạo thanh toán mới
-router.post("/", async (req, res) => {
+router.post("/", auth, async (req, res) => {
   try {
-    const { postId, packageId, duration } = req.body;
+    const { PostId, total, status } = req.body;
 
-    // Kiểm tra post tồn tại và thuộc về user
-    const post = await Post.findById(postId);
+    // Kiểm tra post tồn tại
+    const post = await Post.findById(PostId);
     if (!post) {
       return res.status(404).json({ message: "Không tìm thấy bài đăng" });
     }
 
-    if (post.landlordId.toString() !== req.user._id.toString()) {
+    // Verify user is the owner of the post (if not provided in request)
+    const landlordId = req.user._id;
+    if (post.landlordId.toString() !== landlordId.toString()) {
       return res
         .status(403)
         .json({ message: "Bạn không có quyền thanh toán cho bài đăng này" });
     }
 
-    // Tính toán giá tiền dựa trên thời hạn
-    let total = 0;
-    let durationInDays = 0;
-
-    if (duration === "day") {
-      total = packageInfo.priceday;
-      durationInDays = 1;
-    } else if (duration === "week") {
-      total = packageInfo.priceweek;
-      durationInDays = 7;
-    } else if (duration === "month") {
-      total = packageInfo.pricemonth;
-      durationInDays = 30;
-    } else {
-      return res
-        .status(400)
-        .json({
-          message: "Thời hạn không hợp lệ. Vui lòng chọn day, week hoặc month",
-        });
-    }
-
-    // Tạo thanh toán mới
+    // Create payment with provided data
     const newPayment = new Payment({
-      PostId: postId,
-      landlordId: req.user._id,
+      PostId,
+      landlordId,
       total,
-      status: "pending",
+      status: status || "completed", // Default to completed if not provided
     });
 
     await newPayment.save();
 
-    // Tính ngày hết hạn
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + durationInDays);
-
-    // Cập nhật post với gói và ngày hết hạn
-    await Post.findByIdAndUpdate(postId, {
-      $set: { package: [packageId], expiryDate },
-    });
+    // Update post status if payment is completed
+    if (newPayment.status === "completed" && post.status === "unpaid") {
+      post.status = "waiting"; // Change to waiting for admin approval
+      await post.save();
+    }
 
     res.status(201).json({
       payment: newPayment,
-      expiryDate,
-      message: "Thanh toán đã được tạo, vui lòng hoàn tất thanh toán",
+      message: "Thanh toán đã được tạo thành công",
     });
   } catch (error) {
     console.error("Lỗi khi tạo thanh toán:", error);
-    res.status(500).json({ error: "Lỗi khi tạo thanh toán" });
+    res
+      .status(500)
+      .json({ error: "Lỗi khi tạo thanh toán", details: error.message });
   }
 });
 
@@ -114,19 +93,19 @@ router.patch("/:id/complete", auth, async (req, res) => {
     res.status(500).json({ error: "Lỗi khi hoàn tất thanh toán" });
   }
 });
-router.get('/', async (req, res) => {
-    try {
-      const payments = await Payment.find()
-        .populate('PostId', 'title')  // Populate PostId to get post title
-        .populate('landlordId', 'name')  // Populate landlordId to get name
-        .exec();
-      
-      res.status(200).json(payments);
-    } catch (error) {
-      console.error('Error fetching payments:', error);
-      res.status(500).json({ message: 'Failed to fetch payments' });
-    }
-  });
+router.get("/", async (req, res) => {
+  try {
+    const payments = await Payment.find()
+      .populate("PostId", "title") // Populate PostId to get post title
+      .populate("landlordId", "name") // Populate landlordId to get name
+      .exec();
+
+    res.status(200).json(payments);
+  } catch (error) {
+    console.error("Error fetching payments:", error);
+    res.status(500).json({ message: "Failed to fetch payments" });
+  }
+});
 // API Lấy lịch sử thanh toán của người dùng
 router.get("/my-payments", auth, async (req, res) => {
   try {
@@ -250,14 +229,15 @@ router.get("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const payments = await Payment.find({ landlordId: userId })
-      .populate({
-        path: "PostId",
-        select: "title",
-      });
+    const payments = await Payment.find({ landlordId: userId }).populate({
+      path: "PostId",
+      select: "title",
+    });
 
     if (!payments || payments.length === 0) {
-      return res.status(404).json({ message: "No payments found for this user" });
+      return res
+        .status(404)
+        .json({ message: "No payments found for this user" });
     }
 
     res.json(payments);
