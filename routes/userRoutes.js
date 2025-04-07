@@ -2,7 +2,7 @@ const express = require("express");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-
+const { auth } = require("../middleware/auth");
 const router = express.Router();
 
 // API đăng ký
@@ -166,6 +166,21 @@ router.get("/user/:id", async (req, res) => {
         res.status(500).json({ error: "Lỗi server" });
     }
 });
+
+router.get("/my-profile", auth, async (req, res) => {
+  try {
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: "Không tìm thấy người dùng" });
+    }
+    res.status(200).json(user);
+  } catch (error) {
+    console.error("Error fetching user profile:", error);
+    res.status(500).json({ message: "Lỗi khi lấy thống tin người dùng" });
+  }
+});
+
 router.patch('/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
@@ -201,7 +216,7 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ message: 'Lỗi khi xóa tài khoản' });
   }
 });
-
+// API đăng ký
 router.post('/', async (req, res) => {
   try {
     const { name, phone, password, role } = req.body;
@@ -230,7 +245,7 @@ router.post('/', async (req, res) => {
     res.status(500).json({ message: 'Lỗi khi tạo tài khoản' });
   }
 });
-
+// Lấy đếm số tài khoản
 router.get('/count', async (req, res) => {
   try {
     const count = await User.countDocuments();
@@ -239,5 +254,69 @@ router.get('/count', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+// Sửa thông tin tài khoản
+router.put("/:id",auth, async (req, res) => {
+  try {
+    const { name, phone, avatar } = req.body;
 
+    const existingUser = await User.findOne({ phone });
+    if (existingUser && existingUser._id.toString() !== req.params.id) {
+      return res.status(400).json({ message: "Số điện thoại đã tồn tại!" });
+    }
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        name,
+        phone,
+        avatar,
+        updateAt: Date.now(),
+      },
+      { new: true }
+    );
+
+    res.status(200).json(updatedUser);
+  } catch (err) {
+    console.error("Update error:", err);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+});
+// API đổi mật khẩu
+router.post("/change-password", auth, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const userId = req.user.id;
+    // 1. Tìm user trong database bằng ID thực
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    // 2. Kiểm tra mật khẩu cũ
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Mật khẩu cũ không chính xác" });
+    }
+
+    // 3. Kiểm tra mật khẩu mới không trùng với mật khẩu cũ
+    if (oldPassword === newPassword) {
+      return res.status(400).json({ 
+        message: "Mật khẩu mới phải khác mật khẩu cũ" 
+      });
+    }
+    // 4. Mã hóa mật khẩu mới
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // 5. Cập nhật mật khẩu mới (dùng save() thay vì findByIdAndUpdate)
+    user.password = hashedPassword;
+    user.updateAt = Date.now();
+    await user.save();
+
+    // 6. Trả về thành công
+    res.status(200).json({ message: "Đổi mật khẩu thành công" });
+  } catch (error) {
+    console.error("Lỗi đổi mật khẩu:", error);
+    res.status(500).json({ message: "Lỗi server khi đổi mật khẩu" });
+  }
+});
 module.exports = router;
