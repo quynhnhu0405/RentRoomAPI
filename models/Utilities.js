@@ -1,7 +1,23 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db");
 
-const UtilitiesSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-});
+const Utilities = sequelize.define(
+  "Utilities",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "utilities",
+    timestamps: true,
+  }
+);
 
-module.exports = mongoose.model("Utilities", UtilitiesSchema);
+module.exports = Utilities;

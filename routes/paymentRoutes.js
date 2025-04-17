@@ -1,104 +1,122 @@
 const express = require("express");
-const mongoose = require("mongoose");
-const Payment = require("../models/Payment");
-const Post = require("../models/Post");
-const Package = require("../models/Package");
+const { Payment, Post, Package, User } = require("../models");
 const { auth, authAdmin } = require("../middleware/auth");
 const moment = require("moment");
+const { Op } = require("sequelize");
+const { sequelize } = require("../config/db");
 
 const router = express.Router();
 
-// API Tạo thanh toán mới
+// Create a new payment
 router.post("/", auth, async (req, res) => {
   try {
-    const { PostId, total, status } = req.body;
+    const { postId, amount, status } = req.body;
 
-    // Kiểm tra post tồn tại
-    const post = await Post.findById(PostId);
+    // Check if post exists
+    const post = await Post.findByPk(postId);
     if (!post) {
-      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
+      return res.status(404).json({ message: "Post not found" });
     }
 
-    // Verify user is the owner of the post (if not provided in request)
-    const landlordId = req.user._id;
-    if (post.landlordId.toString() !== landlordId.toString()) {
+    // Verify user is the owner of the post
+    const userId = req.user.id;
+    if (post.userId !== userId) {
       return res
         .status(403)
-        .json({ message: "Bạn không có quyền thanh toán cho bài đăng này" });
+        .json({ message: "You don't have permission to pay for this post" });
     }
 
+    // Calculate end date based on package duration
+    const packageInfo = await Package.findByPk(req.body.packageId);
+    if (!packageInfo) {
+      return res.status(404).json({ message: "Package not found" });
+    }
+
+    const startDate = new Date();
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + packageInfo.duration);
+
     // Create payment with provided data
-    const newPayment = new Payment({
-      PostId,
-      landlordId,
-      total,
+    const newPayment = await Payment.create({
+      postId,
+      userId,
+      packageId: req.body.packageId,
+      amount,
       status: status || "completed", // Default to completed if not provided
+      startDate,
+      endDate,
     });
 
-    await newPayment.save();
-
     // Update post status if payment is completed
-    if (newPayment.status === "completed" && post.status === "unpaid") {
-      post.status = "waiting"; // Change to waiting for admin approval
-      await post.save();
+    if (newPayment.status === "completed" && post.status === "pending") {
+      await Post.update(
+        { status: "active", expiryDate: endDate },
+        { where: { id: postId } }
+      );
     }
 
     res.status(201).json({
       payment: newPayment,
-      message: "Thanh toán đã được tạo thành công",
+      message: "Payment created successfully",
     });
   } catch (error) {
-    console.error("Lỗi khi tạo thanh toán:", error);
+    console.error("Error creating payment:", error);
     res
       .status(500)
-      .json({ error: "Lỗi khi tạo thanh toán", details: error.message });
+      .json({ error: "Error creating payment", details: error.message });
   }
 });
 
-// API Hoàn tất thanh toán
+// Complete a payment
 router.patch("/:id/complete", auth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Kiểm tra payment tồn tại
-    const payment = await Payment.findById(id);
+    // Check if payment exists
+    const payment = await Payment.findByPk(id);
     if (!payment) {
-      return res.status(404).json({ message: "Không tìm thấy thanh toán" });
+      return res.status(404).json({ message: "Payment not found" });
     }
 
-    // Kiểm tra người dùng có quyền cập nhật payment này không
-    if (payment.landlordId.toString() !== req.user._id.toString()) {
+    // Check if user has permission to update this payment
+    if (payment.userId !== req.user.id) {
       return res
         .status(403)
-        .json({ message: "Bạn không có quyền cập nhật thanh toán này" });
+        .json({ message: "You don't have permission to update this payment" });
     }
 
-    // Cập nhật trạng thái thanh toán
-    payment.status = "completed";
-    await payment.save();
+    // Update payment status
+    await Payment.update({ status: "completed" }, { where: { id } });
 
-    // Cập nhật trạng thái bài đăng nếu chưa available
-    const post = await Post.findById(payment.PostId);
-    if (post && post.status !== "available") {
-      post.status = "waiting"; // Chuyển về trạng thái chờ admin duyệt
-      await post.save();
+    // Update post status if not active
+    const post = await Post.findByPk(payment.postId);
+    if (post && post.status !== "active") {
+      await Post.update(
+        { status: "active" },
+        { where: { id: payment.postId } }
+      );
     }
 
+    const updatedPayment = await Payment.findByPk(id);
     res.status(200).json({
-      payment,
-      message: "Thanh toán hoàn tất, bài đăng của bạn sẽ được duyệt sớm",
+      payment: updatedPayment,
+      message: "Payment completed, your post will be approved soon",
     });
   } catch (error) {
-    console.error("Lỗi khi hoàn tất thanh toán:", error);
-    res.status(500).json({ error: "Lỗi khi hoàn tất thanh toán" });
+    console.error("Error completing payment:", error);
+    res.status(500).json({ error: "Error completing payment" });
   }
 });
+
+// Get all payments (admin)
 router.get("/", async (req, res) => {
   try {
-    const payments = await Payment.find()
-      .populate("PostId", "title") // Populate PostId to get post title
-      .populate("landlordId", "name") // Populate landlordId to get name
-      .exec();
+    const payments = await Payment.findAll({
+      include: [
+        { model: Post, attributes: ["title"] },
+        { model: User, attributes: ["name"] },
+      ],
+    });
 
     res.status(200).json(payments);
   } catch (error) {
@@ -106,72 +124,70 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch payments" });
   }
 });
-// API Lấy lịch sử thanh toán của người dùng
+
+// Get user's payment history
 router.get("/my-payments", auth, async (req, res) => {
   try {
-    const payments = await Payment.find({ landlordId: req.user._id })
-      .populate({
-        path: "PostId",
-        select: "title images",
-      })
-      .sort({ createdAt: -1 });
+    const payments = await Payment.findAll({
+      where: { userId: req.user.id },
+      include: [
+        { model: Post, attributes: ["title"] },
+        { model: Package, attributes: ["name", "price", "duration"] },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
 
     res.status(200).json(payments);
   } catch (error) {
-    console.error("Lỗi khi lấy lịch sử thanh toán:", error);
-    res.status(500).json({ error: "Lỗi khi lấy lịch sử thanh toán" });
+    console.error("Error getting payment history:", error);
+    res.status(500).json({ error: "Error getting payment history" });
   }
 });
+
+// Update payment status
 router.patch("/:id", async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
   // Validate the status
-  if (!["pending", "completed", "failed"].includes(status)) {
-    return res.status(400).json({ message: "Trạng thái không hợp lệ" });
+  if (!["pending", "completed", "failed", "refunded"].includes(status)) {
+    return res.status(400).json({ message: "Invalid status" });
   }
-  try {
-    const payment = await Payment.findById(id);
 
-    if (!payment) {
-      return res.status(404).json({ message: "Thanh toán không tìm thấy" });
+  try {
+    const [updated] = await Payment.update({ status }, { where: { id } });
+
+    if (updated === 0) {
+      return res.status(404).json({ message: "Payment not found" });
     }
 
-    payment.status = status;
-    await payment.save();
-
-    res.status(200).json({ message: `Đã cập nhật trạng thái thành ${status}` });
+    res.status(200).json({ message: `Status updated to ${status}` });
   } catch (error) {
     console.error("Error updating payment status:", error);
-    res.status(500).json({ message: "Cập nhật trạng thái thất bại" });
+    res.status(500).json({ message: "Failed to update status" });
   }
 });
 
+// Get total amount of completed payments
 router.get("/completed-total", async (req, res) => {
   try {
-    const result = await Payment.aggregate([
-      {
-        $match: { status: "completed" },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-        },
-      },
-    ]);
+    const result = await Payment.findOne({
+      attributes: [[sequelize.fn("SUM", sequelize.col("amount")), "total"]],
+      where: { status: "completed" },
+      raw: true,
+    });
 
-    const total = result.length > 0 ? result[0].total : 0;
+    const total = result.total || 0;
     res.json({ total });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Lấy doanh thu 6 tháng gần nhất
+// Get monthly revenue for the last 6 months
 router.get("/monthly-revenue", async (req, res) => {
   try {
-    // Tạo mảng 6 tháng gần nhất
+    // Create array of last 6 months
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const date = moment().subtract(i, "months");
@@ -182,7 +198,7 @@ router.get("/monthly-revenue", async (req, res) => {
       });
     }
 
-    // Truy vấn doanh thu từ database
+    // Query revenue from database
     const revenueData = await Promise.all(
       months.map(async (m) => {
         const startDate = moment()
@@ -196,34 +212,29 @@ router.get("/monthly-revenue", async (req, res) => {
           .endOf("month")
           .toDate();
 
-        const result = await Payment.aggregate([
-          {
-            $match: {
-              status: "completed", // Chỉ lấy các giao dịch đã hoàn thành
-              createdAt: { $gte: startDate, $lte: endDate },
+        const result = await Payment.findOne({
+          attributes: [[sequelize.fn("SUM", sequelize.col("amount")), "total"]],
+          where: {
+            status: "completed",
+            createdAt: {
+              [Op.between]: [startDate, endDate],
             },
           },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: "$total" }, // Sử dụng trường 'total' thay vì 'amount'
-            },
-          },
-        ]);
+          raw: true,
+        });
 
         return {
           month: m.name,
-          revenue: result.length > 0 ? result[0].total : 0,
+          revenue: result.total || 0,
         };
       })
     );
 
     res.json(revenueData);
-  } catch (err) {
-    console.error("Error fetching monthly revenue:", err);
-    res.status(500).json({ message: "Lỗi khi lấy dữ liệu doanh thu" });
+  } catch (error) {
+    console.error("Error fetching monthly revenue:", error);
+    res.status(500).json({ message: "Failed to fetch monthly revenue" });
   }
 });
-
 
 module.exports = router;

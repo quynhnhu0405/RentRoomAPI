@@ -1,11 +1,36 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db");
 
-const packageSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    priceday: { type: Number, required: true },
-    priceweek: { type: Number, required: true },
-    pricemonth: { type: Number, required: true },
-    level: { type: Number, required: true },
-}); 
+const Package = sequelize.define(
+  "Package",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    price: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+    duration: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      comment: "Duration in days",
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: "packages",
+    timestamps: true,
+  }
+);
 
-module.exports = mongoose.model("Package", packageSchema);
+module.exports = Package;

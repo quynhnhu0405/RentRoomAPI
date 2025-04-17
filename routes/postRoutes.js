@@ -1,73 +1,88 @@
 const express = require("express");
-const mongoose = require("mongoose");
-const Post = require("../models/Post");
-const Category = require("../models/Category");
-const Payment = require("../models/Payment");
+const {
+  Post,
+  Category,
+  Payment,
+  Package,
+  User,
+  Utilities,
+  sequelize,
+} = require("../models");
 const { auth, authAdmin } = require("../middleware/auth");
-const Package = require("../models/Package");
+const { Op } = require("sequelize");
 
 const router = express.Router();
 
-// API lấy tất cả bài đăng
+// Get all posts
 router.get("/", async (req, res) => {
   try {
-    const posts = await Post.find()
-      .populate("packageDetails", "name priceday priceweek pricemonth level")
-      .lean();
+    const posts = await Post.findAll({
+      include: [
+        { model: Package },
+        { model: Category },
+        { model: User, attributes: ["name"] },
+      ],
+    });
 
-    const formattedPosts = posts.map((post) => ({
-      ...post,
-    }));
-
-    res.status(200).json(formattedPosts);
+    res.status(200).json(posts);
   } catch (error) {
-    console.error("Lỗi khi tìm bài:", error);
-    res.status(500).json({ error: "Lỗi khi tìm bài" });
+    console.error("Error finding posts:", error);
+    res.status(500).json({ error: "Error finding posts" });
   }
 });
 
+// Get latest posts
 router.get("/latest-posts", async (req, res) => {
   try {
-    // Fetch the latest posts without any ID validation
-    const latestPosts = await Post.find({ isVisible: true })
-      .sort({ createdAt: -1 })
-      .limit(8)
-      .populate("category", "name")
-      .populate("landlordId", "name")
-      .populate("packageDetails", "name priceday priceweek pricemonth level");
+    // Fetch the latest posts
+    const latestPosts = await Post.findAll({
+      where: {
+        featured: true,
+        status: "active",
+      },
+      order: [["createdAt", "DESC"]],
+      limit: 8,
+      include: [
+        { model: Category, attributes: ["name"] },
+        { model: User, attributes: ["name"] },
+      ],
+    });
 
     res.json(latestPosts);
   } catch (err) {
-    // Just return the error message directly, no ID validation here
     console.error(err);
     res.status(500).json({ message: err.message });
   }
 });
+
+// Get total post count
 router.get("/count", async (req, res) => {
   try {
-    const count = await Post.countDocuments();
+    const count = await Post.count();
     res.json({ total: count });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
-//API lấy các bài đăng của 1 users
+
+// Get posts by current user
 router.get("/my-posts", auth, async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
 
-    // Validate userId
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ error: "Invalid user ID" });
-    }
-
-    // Lấy tất cả bài post của user
-    const posts = await Post.find({ landlordId: userId, isVisible: true })
-      .populate("category", "name") // Lấy thêm tên category
-      .populate("packageDetails", "name")
-      .populate("utilityDetails", "name") // Lấy thêm tên các tiện ích
-      .sort({ createdAt: -1 }) // Sắp xếp theo thời gian tạo mới nhất
-      .lean();
+    // Get all posts by user
+    const posts = await Post.findAll({
+      where: {
+        userId,
+        featured: true,
+      },
+      include: [
+        { model: Category, attributes: ["name"] },
+        { model: Package, attributes: ["name"] },
+        { model: Utilities, attributes: ["name"], through: { attributes: [] } },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
 
     res.json({
       success: true,
@@ -79,11 +94,12 @@ router.get("/my-posts", auth, async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Server error while getting posts",
-      message: error.message, // Thêm thông báo lỗi chi tiết
+      message: error.message,
     });
   }
 });
-// API lấy danh sách phòng trọ
+
+// Get room listings
 router.get("/phong-tro", async (req, res) => {
   try {
     const {
@@ -97,70 +113,72 @@ router.get("/phong-tro", async (req, res) => {
       areaMax,
     } = req.query;
 
-    // Xây dựng query
-    const query = {
-      "category.name": "Phòng trọ",
-      status: "available",
-      isVisible: true,
+    // Build query conditions
+    const whereConditions = {
+      status: "active",
+      "$Category.name$": "Phòng trọ",
     };
 
-    // Tìm theo từ khóa trong tiêu đề hoặc mô tả
+    // Search by keywords in title or description
     if (keyword) {
-      query.$or = [
-        { title: { $regex: keyword, $options: "i" } },
-        { description: { $regex: keyword, $options: "i" } },
+      whereConditions[Op.or] = [
+        { title: { [Op.like]: `%${keyword}%` } },
+        { description: { [Op.like]: `%${keyword}%` } },
       ];
     }
 
-    // Tìm theo vị trí
+    // Search by location
     if (province) {
-      query["location.province"] = province;
+      whereConditions.province = province;
     }
 
     if (district) {
-      query["location.district"] = district;
+      whereConditions.district = district;
     }
 
     if (ward) {
-      query["location.ward"] = ward;
+      whereConditions.ward = ward;
     }
 
-    // Tìm theo khoảng giá
+    // Search by price range
     if (priceMin || priceMax) {
-      query.price = {};
-      if (priceMin) query.price.$gte = parseInt(priceMin);
-      if (priceMax) query.price.$lte = parseInt(priceMax);
+      whereConditions.price = {};
+      if (priceMin) whereConditions.price[Op.gte] = parseInt(priceMin);
+      if (priceMax) whereConditions.price[Op.lte] = parseInt(priceMax);
     }
 
-    // Tìm theo khoảng diện tích
+    // Search by area range
     if (areaMin || areaMax) {
-      query.area = {};
-      if (areaMin) query.area.$gte = parseInt(areaMin);
-      if (areaMax) query.area.$lte = parseInt(areaMax);
+      whereConditions.area = {};
+      if (areaMin) whereConditions.area[Op.gte] = parseInt(areaMin);
+      if (areaMax) whereConditions.area[Op.lte] = parseInt(areaMax);
     }
 
-    const posts = await Post.find(query)
-      .sort({ "packageDetails.level": 1 })
-      .limit(8)
-      .populate("packageDetails", "name priceday priceweek pricemonth level")
-      .populate("utilityDetails", "name")
-      .lean();
+    const posts = await Post.findAll({
+      where: whereConditions,
+      include: [
+        { model: Category },
+        { model: Package },
+        { model: Utilities, through: { attributes: [] } },
+      ],
+      order: [
+        ["featured", "DESC"],
+        ["createdAt", "DESC"],
+      ],
+      limit: 8,
+    });
 
-    const formattedPosts = posts.map((post) => ({
-      ...post,
-    }));
-
-    res.status(200).json(formattedPosts);
+    res.status(200).json(posts);
   } catch (error) {
-    console.error("Lỗi khi tìm phòng trọ:", error);
+    console.error("Error searching for rooms:", error);
     res.status(500).json({
-      error: "Lỗi khi tìm phòng trọ",
+      error: "Error searching for rooms",
       details: error.message,
     });
   }
 });
 
-// API lấy danh sách căn hộ
+// Get apartment listings
 router.get("/can-ho", async (req, res) => {
   try {
     const {
@@ -174,73 +192,77 @@ router.get("/can-ho", async (req, res) => {
       areaMax,
     } = req.query;
 
-    // Xây dựng query
-    const query = {
-      "category.name": "Chung cư căn hộ",
-      status: "available",
-      isVisible: true,
+    // Build query conditions
+    const whereConditions = {
+      status: "active",
+      "$Category.name$": "Căn hộ chung cư",
     };
 
-    // Tìm theo từ khóa trong tiêu đề hoặc mô tả
+    // Search by keywords in title or description
     if (keyword) {
-      query.$or = [
-        { title: { $regex: keyword, $options: "i" } },
-        { description: { $regex: keyword, $options: "i" } },
+      whereConditions[Op.or] = [
+        { title: { [Op.like]: `%${keyword}%` } },
+        { description: { [Op.like]: `%${keyword}%` } },
       ];
     }
 
-    // Tìm theo vị trí
+    // Search by location
     if (province) {
-      query["location.province"] = province;
+      whereConditions.province = province;
     }
 
     if (district) {
-      query["location.district"] = district;
+      whereConditions.district = district;
     }
 
     if (ward) {
-      query["location.ward"] = ward;
+      whereConditions.ward = ward;
     }
 
-    // Tìm theo khoảng giá
+    // Search by price range
     if (priceMin || priceMax) {
-      query.price = {};
-      if (priceMin) query.price.$gte = parseInt(priceMin);
-      if (priceMax) query.price.$lte = parseInt(priceMax);
+      whereConditions.price = {};
+      if (priceMin) whereConditions.price[Op.gte] = parseInt(priceMin);
+      if (priceMax) whereConditions.price[Op.lte] = parseInt(priceMax);
     }
 
-    // Tìm theo khoảng diện tích
+    // Search by area range
     if (areaMin || areaMax) {
-      query.area = {};
-      if (areaMin) query.area.$gte = parseInt(areaMin);
-      if (areaMax) query.area.$lte = parseInt(areaMax);
+      whereConditions.area = {};
+      if (areaMin) whereConditions.area[Op.gte] = parseInt(areaMin);
+      if (areaMax) whereConditions.area[Op.lte] = parseInt(areaMax);
     }
 
-    const posts = await Post.find(query)
-      .sort({ "packageDetails.level": 1 })
-      .limit(8)
-      .populate("packageDetails", "name priceday priceweek pricemonth level")
-      .populate("utilityDetails", "name")
-      .lean();
-    const formattedPosts = posts.map((post) => ({
-      ...post,
-    }));
+    const posts = await Post.findAll({
+      where: whereConditions,
+      include: [
+        { model: Category },
+        { model: Package },
+        { model: Utilities, through: { attributes: [] } },
+      ],
+      order: [
+        ["featured", "DESC"],
+        ["createdAt", "DESC"],
+      ],
+      limit: 8,
+    });
 
-    res.status(200).json(formattedPosts);
+    res.status(200).json(posts);
   } catch (error) {
-    console.error("Lỗi khi tìm chung cư căn hộ:", error);
+    console.error("Error searching for apartments:", error);
     res.status(500).json({
-      error: "Lỗi khi tìm chung cư căn hộ",
+      error: "Error searching for apartments",
       details: error.message,
     });
   }
 });
 
-// API lấy danh sách ở ghép
-router.get("/o-ghep", async (req, res) => {
+// Search API
+router.get("/search", async (req, res) => {
   try {
     const {
       keyword,
+      category,
       province,
       district,
       ward,
@@ -248,83 +270,101 @@ router.get("/o-ghep", async (req, res) => {
       priceMax,
       areaMin,
       areaMax,
+      sort = "newest",
+      page = 1,
+      limit = 10,
     } = req.query;
 
-    // Xây dựng query
-    const query = {
-      "category.name": "Ở ghép",
-      status: "available",
-      isVisible: true,
+    const offset = (page - 1) * limit;
+
+    // Build query conditions
+    const whereConditions = {
+      status: "active",
     };
 
-    // Tìm theo từ khóa trong tiêu đề hoặc mô tả
+    // Search by category
+    if (category) {
+      whereConditions["$Category.name$"] = category;
+    }
+
+    // Search by keywords in title or description
     if (keyword) {
-      query.$or = [
-        { title: { $regex: keyword, $options: "i" } },
-        { description: { $regex: keyword, $options: "i" } },
+      whereConditions[Op.or] = [
+        { title: { [Op.like]: `%${keyword}%` } },
+        { description: { [Op.like]: `%${keyword}%` } },
       ];
     }
 
-    // Tìm theo vị trí
+    // Search by location
     if (province) {
-      query["location.province"] = province;
+      whereConditions.province = province;
     }
 
     if (district) {
-      query["location.district"] = district;
+      whereConditions.district = district;
     }
 
     if (ward) {
-      query["location.ward"] = ward;
+      whereConditions.ward = ward;
     }
 
-    // Tìm theo khoảng giá
+    // Search by price range
     if (priceMin || priceMax) {
-      query.price = {};
-      if (priceMin) query.price.$gte = parseInt(priceMin);
-      if (priceMax) query.price.$lte = parseInt(priceMax);
+      whereConditions.price = {};
+      if (priceMin) whereConditions.price[Op.gte] = parseInt(priceMin);
+      if (priceMax) whereConditions.price[Op.lte] = parseInt(priceMax);
     }
 
-    // Tìm theo khoảng diện tích
+    // Search by area range
     if (areaMin || areaMax) {
-      query.area = {};
-      if (areaMin) query.area.$gte = parseInt(areaMin);
-      if (areaMax) query.area.$lte = parseInt(areaMax);
+      whereConditions.area = {};
+      if (areaMin) whereConditions.area[Op.gte] = parseInt(areaMin);
+      if (areaMax) whereConditions.area[Op.lte] = parseInt(areaMax);
     }
 
-    const posts = await Post.find(query)
-      .sort({ "packageDetails.level": 1 })
-      .limit(8)
-      .populate("packageDetails", "name priceday priceweek pricemonth level")
-      .populate("utilityDetails", "name")
-      .lean();
-    const formattedPosts = posts.map((post) => ({
-      ...post,
-    }));
+    // Define sort order
+    let order = [["createdAt", "DESC"]]; // Default: newest
 
-    res.status(200).json(formattedPosts);
-  } catch (error) {
-    console.error("Lỗi khi tìm ở ghép:", error);
-    res.status(500).json({
-      error: "Lỗi khi tìm ở ghép",
-      details: error.message,
+    if (sort === "price-asc") {
+      order = [["price", "ASC"]];
+    } else if (sort === "price-desc") {
+      order = [["price", "DESC"]];
+    } else if (sort === "area-asc") {
+      order = [["area", "ASC"]];
+    } else if (sort === "area-desc") {
+      order = [["area", "DESC"]];
+    }
+
+    // Always prioritize featured posts
+    order.unshift(["featured", "DESC"]);
+
+    // Execute query with pagination
+    const { count, rows: posts } = await Post.findAndCountAll({
+      where: whereConditions,
+      include: [
+        { model: Category },
+        { model: User, attributes: ["name"] },
+        { model: Utilities, through: { attributes: [] } },
+      ],
+      order,
+      offset,
+      limit: parseInt(limit),
     });
-  }
-});
 
-// API lấy danh sách bài đăng của người dùng đang đăng nhập
-router.get("/my-posts", auth, async (req, res) => {
-  try {
-    const posts = await Post.find({ landlordId: req.user._id })
-      .populate("packageDetails", "name priceday priceweek pricemonth level")
-      .populate("utilityDetails", "name")
-      .sort({ createdAt: -1 })
-      .lean();
-
-    res.status(200).json(posts);
+    res.status(200).json({
+      posts,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+    });
   } catch (error) {
-    console.error("Lỗi khi lấy bài đăng của người dùng:", error);
-    res.status(500).json({ error: "Lỗi khi lấy bài đăng" });
+    console.error("Error searching:", error);
+    res
+      .status(500)
+      .json({ error: "Error during search", details: error.message });
   }
 });
 
@@ -400,7 +440,7 @@ router.get("/search", async (req, res) => {
   }
 });
 
-// API Tạo bài đăng mới (yêu cầu đăng nhập)
+// Create a new post
 router.post("/", auth, async (req, res) => {
   try {
     const {
@@ -408,221 +448,224 @@ router.post("/", auth, async (req, res) => {
       description,
       price,
       area,
-      category,
-      location,
+      categoryId,
+      address,
+      province,
+      district,
+      ward,
       utilities,
       images,
-      package,
-      expiryDate,
+      packageId,
     } = req.body;
 
-    // Kiểm tra category
-    const categoryExists = await Category.findById(category.id);
+    // Check if category exists
+    const categoryExists = await Category.findByPk(categoryId);
     if (!categoryExists) {
-      return res.status(400).json({ message: "Danh mục không tồn tại" });
+      return res.status(400).json({ message: "Category doesn't exist" });
     }
 
-    const packageExists = await Package.findById(package[0].id);
+    // Check if package exists
+    const packageExists = await Package.findByPk(packageId);
+    if (!packageExists) {
+      return res.status(400).json({ message: "Package doesn't exist" });
+    }
 
-    // Tạo bài đăng mới với landlordId là ID của user đang đăng nhập
-    const newPost = new Post({
+    // Calculate expiry date based on package duration
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + packageExists.duration);
+
+    // Create new post with current user ID
+    const newPost = await Post.create({
       title,
       description,
-      price,
-      area,
-      category,
-      location,
-      utilities,
-      images,
-      landlordId: req.user._id,
-      package,
+      price: parseFloat(price),
+      area: parseFloat(area),
+      categoryId,
+      address,
+      province,
+      district,
+      ward,
+      images: images || [],
+      userId: req.user.id,
+      status: "pending", // Default is pending until payment
       expiryDate,
-      status: "unpaid", // Mặc định là chưa thanh toán
+      featured: false,
+      viewCount: 0,
     });
 
-    await newPost.save();
-    const totalPrice = packageExists
-      ? packageExists[`price${package[0].period}`] * package[0].quantity
-      : 0;
+    // Add utilities if provided
+    if (utilities && utilities.length > 0) {
+      await newPost.addUtilities(utilities);
+    }
 
-    // Automatically create a payment record in pending status
-    const newPayment = new Payment({
-      PostId: newPost._id,
-      landlordId: req.user._id,
-      total: totalPrice, // Use the provided total price or default to 0
-      status: "pending", // Payment starts as pending and will be approved by admin
+    // Create a payment record in pending status
+    const newPayment = await Payment.create({
+      postId: newPost.id,
+      userId: req.user.id,
+      packageId,
+      amount: packageExists.price,
+      status: "pending",
+      startDate: new Date(),
+      endDate: expiryDate,
     });
-
-    await newPayment.save();
 
     // Return both the post and payment information
     res.status(201).json({
       post: newPost,
       payment: newPayment,
-      message: "Bài đăng đã được tạo, thanh toán đang chờ xác nhận",
+      message: "Post created successfully. Please complete the payment.",
     });
   } catch (error) {
-    console.error("Lỗi khi tạo bài đăng:", error);
+    console.error("Error creating post:", error);
     res
       .status(500)
-      .json({ error: "Lỗi khi tạo bài đăng", details: error.message });
+      .json({ error: "Error creating post", details: error.message });
   }
 });
 
-// API Lấy chi tiết bài đăng
+// Get post by ID
 router.get("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-
-    // Validate ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "ID không hợp lệ" });
-    }
-
-    const post = await Post.findOne({ _id: id, isVisible: true })
-      .populate("packageDetails", "name priceday priceweek pricemonth level")
-      .populate("utilityDetails", "name")
-      .populate({
-        path: "landlordId",
-        select: "name phone avatar createAt",
-      })
-      .lean();
+    const post = await Post.findByPk(req.params.id, {
+      include: [
+        { model: Category },
+        { model: User, attributes: ["name", "phone"] },
+        { model: Utilities, through: { attributes: [] } },
+      ],
+    });
 
     if (!post) {
-      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
+      return res.status(404).json({ message: "Post not found" });
     }
 
-    res.status(200).json(post);
-  } catch (error) {
-    console.error("Lỗi khi lấy chi tiết bài đăng:", error);
-    res.status(500).json({ error: "Lỗi khi lấy chi tiết bài đăng" });
-  }
-});
-
-// API Cập nhật bài đăng (yêu cầu đăng nhập và là chủ bài đăng hoặc admin)
-router.put("/:id", auth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    // Validate ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "ID không hợp lệ" });
-    }
-    // Tìm bài đăng
-    const post = await Post.findById(id);
-    if (!post) {
-      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
-    }
-
-    // Kiểm tra quyền (phải là chủ bài đăng hoặc admin)
-    if (
-      post.landlordId.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
-    ) {
-      return res
-        .status(403)
-        .json({ message: "Bạn không có quyền cập nhật bài đăng này" });
-    }
-
-    // Cập nhật bài đăng
-    const updatedPost = await Post.findByIdAndUpdate(
-      id,
-      { ...req.body, status: "waiting" }, // Reset về trạng thái chờ duyệt khi cập nhật
-      { new: true, runValidators: true }
+    // Increment view count
+    await Post.update(
+      { viewCount: post.viewCount + 1 },
+      { where: { id: req.params.id } }
     );
 
-    res.status(200).json(updatedPost);
+    // Return with incremented view count
+    post.viewCount += 1;
+    res.status(200).json(post);
   } catch (error) {
-    console.error("Lỗi khi cập nhật bài đăng:", error);
-    res.status(500).json({ error: "Lỗi khi cập nhật bài đăng" });
+    console.error("Error getting post:", error);
+    res.status(500).json({ error: "Error retrieving post" });
   }
 });
 
-// API admin phê duyệt/từ chối bài đăng
-// PATCH /api/posts/:id/status
-router.patch("/admin/:id/status", authAdmin, async (req, res) => {
+// Update a post
+router.put("/:id", auth, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status, expiryDate } = req.body;
+    const postId = req.params.id;
 
-    // Validate ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "ID không hợp lệ" });
+    // Check if post exists
+    const post = await Post.findByPk(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
     }
 
+    // Check permissions (must be post owner or admin)
+    if (post.userId !== req.user.id && req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to update this post" });
+    }
+
+    // Update post
+    const [updated] = await Post.update(req.body, {
+      where: { id: postId },
+    });
+
+    // If utilities are provided, update them
+    if (req.body.utilities) {
+      const post = await Post.findByPk(postId);
+      await post.setUtilities(req.body.utilities);
+    }
+
+    // Get updated post
+    const updatedPost = await Post.findByPk(postId, {
+      include: [
+        { model: Category },
+        { model: Utilities, through: { attributes: [] } },
+      ],
+    });
+
+    res.status(200).json({
+      post: updatedPost,
+      message: "Post updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating post:", error);
+    res
+      .status(500)
+      .json({ error: "Error updating post", details: error.message });
+  }
+});
+
+// Delete a post
+router.delete("/:id", auth, async (req, res) => {
+  try {
+    const postId = req.params.id;
+
+    // Check if post exists
+    const post = await Post.findByPk(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    // Check permissions (must be post owner or admin)
+    if (post.userId !== req.user.id && req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this post" });
+    }
+
+    // Delete post
+    await Post.destroy({ where: { id: postId } });
+
+    res.status(200).json({ message: "Post deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting post:", error);
+    res.status(500).json({ error: "Error deleting post" });
+  }
+});
+
+// Change post status
+router.patch("/:id/status", authAdmin, async (req, res) => {
+  try {
+    const { status } = req.body;
+    const postId = req.params.id;
+
     // Validate status
-    const allowedStatuses = [
-      "unpaid",
-      "available",
-      "waiting",
+    const validStatuses = [
+      "pending",
+      "active",
+      "rented",
       "expired",
       "rejected",
     ];
-    if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({
-        error: `Trạng thái phải là một trong: ${allowedStatuses.join(", ")}`,
-      });
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
     }
 
-    const updateData = { status };
-    if (expiryDate) updateData.expiryDate = new Date(expiryDate);
+    // Update post status
+    const [updated] = await Post.update({ status }, { where: { id: postId } });
 
-    const updatedPost = await Post.findByIdAndUpdate(id, updateData, {
-      new: true,
+    if (updated === 0) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    const updatedPost = await Post.findByPk(postId);
+    res.status(200).json({
+      post: updatedPost,
+      message: `Post status updated to ${status}`,
     });
-
-    if (!updatedPost) {
-      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
-    }
-
-    res.status(200).json(updatedPost);
-  } catch (err) {
-    console.error("Lỗi khi cập nhật trạng thái bài đăng:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// API ẩn bài đăng (yêu cầu đăng nhập và là chủ bài đăng hoặc admin)
-router.delete("/:id", auth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updatedPost = await Post.findByIdAndUpdate(
-      id,
-      { isVisible: false }, // Chỉ cập nhật trường isVisible
-      { new: true } // Trả về bài đăng sau khi cập nhật
-    );
-    // Kiểm tra xem bài đăng có tồn tại không
-    if (!updatedPost) {
-      return res.status(404).json({ message: "Không tìm thấy bài đăng" });
-    }
-
-    // Kiểm tra quyền (phải là chủ bài đăng hoặc admin)
-    if (
-      updatedPost.landlordId.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
-    ) {
-      return res
-        .status(403)
-        .json({ message: "Không có quyền cập nhật bài đăng này" });
-    }
-
-    // Kiểm tra quyền (phải là chủ bài đăng hoặc admin)
-    if (
-      updatedPost.landlordId.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
-    ) {
-      return res
-        .status(403)
-        .json({ message: "Không có quyền cập nhật bài đăng này" });
-    }
-
-    return res.status(200).json();
   } catch (error) {
-    console.error("Lỗi khi cập nhật bài đăng:", error);
-    return res
-      .status(500)
-      .json({ message: "Lỗi server", error: error.message });
+    console.error("Error updating post status:", error);
+    res.status(500).json({ error: "Error updating status" });
   }
 });
+
 // API Gia hạn bài đăng (yêu cầu đăng nhập)
 router.put("/:postId/renew", auth, async (req, res) => {
   try {
@@ -637,11 +680,7 @@ router.put("/:postId/renew", auth, async (req, res) => {
     }
 
     // Kiểm tra gói gia hạn
-    if (
-      !packageArr ||
-      !Array.isArray(packageArr) ||
-      packageArr.length === 0
-    ) {
+    if (!packageArr || !Array.isArray(packageArr) || packageArr.length === 0) {
       return res.status(400).json({ message: "Thiếu thông tin gói gia hạn" });
     }
 
@@ -666,7 +705,8 @@ router.put("/:postId/renew", auth, async (req, res) => {
     const totalPrice = pricePerUnit * quantity;
 
     // Tính toán ngày hết hạn mới
-    let currentExpiry = post.expiryDate > new Date() ? new Date(post.expiryDate) : new Date();
+    let currentExpiry =
+      post.expiryDate > new Date() ? new Date(post.expiryDate) : new Date();
     const daysToAdd = {
       day: quantity,
       week: quantity * 7,
@@ -715,7 +755,6 @@ router.put("/:postId/renew", auth, async (req, res) => {
       payment: newPayment,
       message: "Yêu cầu gia hạn đã được tạo, vui lòng thanh toán",
     });
-
   } catch (error) {
     console.error("Lỗi khi gia hạn bài đăng:", error);
     res.status(500).json({
@@ -724,6 +763,7 @@ router.put("/:postId/renew", auth, async (req, res) => {
     });
   }
 });
+
 // API đếm bài đăng theo userId
 router.get("/count/:userId", async (req, res) => {
   try {

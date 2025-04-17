@@ -4,34 +4,33 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { auth } = require("../middleware/auth");
 const router = express.Router();
+const { Op } = require("sequelize");
 
-// API đăng ký
+// Register API
 router.post("/register", async (req, res) => {
   try {
     const { name, phone, password } = req.body;
 
-    // Kiểm tra xem số điện thoại đã tồn tại chưa
-    const existingUser = await User.findOne({ phone });
+    // Check if phone number already exists
+    const existingUser = await User.findOne({ where: { phone } });
     if (existingUser) {
-      return res.status(400).json({ message: "Số điện thoại đã được sử dụng" });
+      return res.status(400).json({ message: "Phone number already in use" });
     }
 
-    // Mã hóa mật khẩu
+    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Tạo user mới
-    const newUser = new User({
+    // Create new user
+    const newUser = await User.create({
       name,
       phone,
       password: hashedPassword,
     });
 
-    await newUser.save();
-
-    // Tạo token
+    // Create token
     const token = jwt.sign(
-      { id: newUser._id, role: newUser.role },
+      { id: newUser.id, role: newUser.role },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
     );
@@ -39,48 +38,47 @@ router.post("/register", async (req, res) => {
     res.status(201).json({
       token,
       user: {
-        id: newUser._id,
+        id: newUser.id,
         name: newUser.name,
         phone: newUser.phone,
         role: newUser.role,
       },
     });
   } catch (error) {
-    console.error("Lỗi đăng ký:", error);
-    res.status(500).json({ error: "Lỗi khi đăng ký tài khoản" });
+    console.error("Registration error:", error);
+    res.status(500).json({ error: "Error during registration" });
   }
 });
 
-// API đăng nhập
+// Login API
 router.post("/login", async (req, res) => {
   try {
     const { phone, password } = req.body;
 
-    // Kiểm tra user tồn tại
-    const user = await User.findOne({ phone });
+    // Check user exists
+    const user = await User.findOne({ where: { phone } });
     if (!user) {
       return res
         .status(400)
-        .json({ message: "Số điện thoại hoặc mật khẩu không đúng" });
-
+        .json({ message: "Invalid phone number or password" });
     }
 
-    // Kiểm tra mật khẩu
+    // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res
         .status(400)
-        .json({ message: "Số điện thoại hoặc mật khẩu không đúng" });
+        .json({ message: "Invalid phone number or password" });
     }
 
-    // Kiểm tra trạng thái tài khoản
+    // Check account status
     if (user.status !== "active") {
-      return res.status(403).json({ message: "Tài khoản của bạn đã bị khóa" });
+      return res.status(403).json({ message: "Your account has been locked" });
     }
 
-    // Tạo token
+    // Create token
     const token = jwt.sign(
-      { id: user._id, role: user.role },
+      { id: user.id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
     );
@@ -88,235 +86,266 @@ router.post("/login", async (req, res) => {
     res.status(200).json({
       token,
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         phone: user.phone,
         role: user.role,
       },
     });
   } catch (error) {
-    console.error("Lỗi đăng nhập:", error);
-    res.status(500).json({ error: "Lỗi khi đăng nhập" });
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Error during login" });
   }
 });
 
-// API quên mật khẩu
+// Forgot password API
 router.post("/forgot-password", async (req, res) => {
   try {
     const { phone } = req.body;
 
-    // Kiểm tra user tồn tại
-    const user = await User.findOne({ phone });
+    // Check if user exists
+    const user = await User.findOne({ where: { phone } });
     if (!user) {
       return res
         .status(404)
-        .json({ message: "Không tìm thấy tài khoản với số điện thoại này" });
+        .json({ message: "No account found with this phone number" });
     }
 
-    // Trong thực tế, gửi mã xác nhận qua SMS hoặc email
-    // Ở đây tạm thời trả về thành công
+    // In production, send verification code via SMS or email
+    // For now, just return success
 
     res
       .status(200)
-      .json({ message: "Vui lòng kiểm tra tin nhắn để đặt lại mật khẩu" });
+      .json({ message: "Please check your messages to reset your password" });
   } catch (error) {
-    console.error("Lỗi quên mật khẩu:", error);
-    res.status(500).json({ error: "Lỗi khi xử lý yêu cầu" });
+    console.error("Forgot password error:", error);
+    res.status(500).json({ error: "Error processing request" });
   }
 });
 
-// API Thêm User (chỉ admin)
+// Add User API (admin only)
 router.post("/", async (req, res) => {
   try {
-    const newUser = new User(req.body);
-    await newUser.save();
+    const newUser = await User.create(req.body);
     res.status(201).json(newUser);
   } catch (error) {
-    res.status(500).json({ error: "Lỗi khi thêm user" });
+    res.status(500).json({ error: "Error adding user" });
   }
 });
 
-// API Lấy danh sách users (chỉ admin)
+// Get all users API (admin only)
 router.get("/", async (req, res) => {
   try {
-    const users = await User.find().select("-password");
+    const users = await User.findAll({
+      attributes: { exclude: ["password"] },
+    });
     res.status(200).json(users);
   } catch (error) {
-    res.status(500).json({ error: "Lỗi khi tìm user" });
+    res.status(500).json({ error: "Error finding users" });
   }
 });
 
-//Lấy thông tin một user theo ID
+// Get user by ID
 router.get("/user/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ error: "ID không hợp lệ" });
-        }
+    const user = await User.findByPk(id, {
+      attributes: { exclude: ["password"] },
+    });
 
-        const user = await User.findById(id).select("-password");
-        if (!user) {
-            return res.status(404).json({ error: "User không tồn tại" });
-        }
-
-        res.status(200).json(user);
-    } catch (error) {
-        console.error("Lỗi khi lấy thông tin user:", error);
-        res.status(500).json({ error: "Lỗi server" });
+    if (!user) {
+      return res.status(404).json({ error: "User does not exist" });
     }
+
+    res.status(200).json(user);
+  } catch (error) {
+    console.error("Error getting user info:", error);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 router.get("/my-profile", auth, async (req, res) => {
   try {
+    const user = await User.findByPk(req.user.id, {
+      attributes: { exclude: ["password"] },
+    });
 
-    const user = await User.findById(req.user.id);
     if (!user) {
-      return res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return res.status(404).json({ message: "User not found" });
     }
     res.status(200).json(user);
   } catch (error) {
     console.error("Error fetching user profile:", error);
-    res.status(500).json({ message: "Lỗi khi lấy thống tin người dùng" });
+    res.status(500).json({ message: "Error getting user information" });
   }
 });
 
-router.patch('/:id/status', async (req, res) => {
+router.patch("/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
-    const user = await User.findByIdAndUpdate(
-      req.params.id, 
+
+    const [updated] = await User.update(
       { status },
-      { new: true }
+      { where: { id: req.params.id } }
     );
-    
-    if (!user) {
-      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+
+    if (updated === 0) {
+      return res.status(404).json({ message: "User not found" });
     }
-    
+
+    const user = await User.findByPk(req.params.id);
     res.json(user);
   } catch (error) {
-    console.error('Error updating user status:', error);
-    res.status(500).json({ message: 'Lỗi khi cập nhật trạng thái' });
+    console.error("Error updating user status:", error);
+    res.status(500).json({ message: "Error updating status" });
   }
 });
 
-// Xóa tài khoản
-router.delete('/:id', async (req, res) => {
+// Delete user account
+router.delete("/:id", async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
-    
-    if (!user) {
-      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    const deletedCount = await User.destroy({
+      where: { id: req.params.id },
+    });
+
+    if (deletedCount === 0) {
+      return res.status(404).json({ message: "User not found" });
     }
-    
-    res.json({ message: 'Xóa tài khoản thành công' });
+
+    res.json({ message: "User account deleted successfully" });
   } catch (error) {
-    console.error('Error deleting user:', error);
-    res.status(500).json({ message: 'Lỗi khi xóa tài khoản' });
+    console.error("Error deleting user:", error);
+    res.status(500).json({ message: "Error deleting user account" });
   }
 });
+
 // API đăng ký
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { name, phone, password, role } = req.body;
-    
+
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
-      return res.status(400).json({ message: 'Số điện thoại đã được đăng ký' });
+      return res.status(400).json({ message: "Số điện thoại đã được đăng ký" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    
+
     const newUser = new User({
       name,
       phone,
       password: hashedPassword,
-      role: role || 'user',
-      status: 'active'
+      role: role || "user",
+      status: "active",
     });
     await newUser.save();
     const userResponse = newUser.toObject();
     delete userResponse.password;
-    
+
     res.status(201).json({ user: userResponse });
   } catch (error) {
-    console.error('Error creating user:', error);
-    res.status(500).json({ message: 'Lỗi khi tạo tài khoản' });
+    console.error("Error creating user:", error);
+    res.status(500).json({ message: "Lỗi khi tạo tài khoản" });
   }
 });
-// Lấy đếm số tài khoản
-router.get('/count', async (req, res) => {
+
+// Get user count
+router.get("/count", async (req, res) => {
   try {
-    const count = await User.countDocuments();
+    const count = await User.count();
     res.json({ total: count });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
-// Sửa thông tin tài khoản
-router.put("/:id",auth, async (req, res) => {
+
+// Update user information
+router.put("/:id", auth, async (req, res) => {
   try {
     const { name, phone, avatar } = req.body;
 
-    const existingUser = await User.findOne({ phone });
-    if (existingUser && existingUser._id.toString() !== req.params.id) {
-      return res.status(400).json({ message: "Số điện thoại đã tồn tại!" });
+    // Check if phone number is already used by another user
+    const existingUser = await User.findOne({
+      where: {
+        phone,
+        id: { [Op.ne]: req.params.id },
+      },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ message: "Phone number already exists!" });
     }
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
+
+    const [updated] = await User.update(
       {
         name,
         phone,
         avatar,
-        updateAt: Date.now(),
+        updatedAt: new Date(),
       },
-      { new: true }
+      { where: { id: req.params.id } }
     );
+
+    if (updated === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const updatedUser = await User.findByPk(req.params.id, {
+      attributes: { exclude: ["password"] },
+    });
 
     res.status(200).json(updatedUser);
   } catch (err) {
     console.error("Update error:", err);
-    res.status(500).json({ message: "Lỗi server" });
+    res.status(500).json({ message: "Server error" });
   }
 });
-// API đổi mật khẩu
+
+// Change password API
 router.post("/change-password", auth, async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
     const userId = req.user.id;
-    // 1. Tìm user trong database bằng ID thực
-    const user = await User.findById(userId);
+
+    // Find user in database by ID
+    const user = await User.findByPk(userId);
     if (!user) {
-      return res.status(404).json({ message: "Người dùng không tồn tại" });
+      return res.status(404).json({ message: "User not found" });
     }
 
-    // 2. Kiểm tra mật khẩu cũ
+    // Check old password
     const isMatch = await bcrypt.compare(oldPassword, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Mật khẩu cũ không chính xác" });
+      return res.status(400).json({ message: "Old password is incorrect" });
     }
 
-    // 3. Kiểm tra mật khẩu mới không trùng với mật khẩu cũ
+    // Check new password is different from old password
     if (oldPassword === newPassword) {
-      return res.status(400).json({ 
-        message: "Mật khẩu mới phải khác mật khẩu cũ" 
+      return res.status(400).json({
+        message: "New password must be different from the old password",
       });
     }
-    // 4. Mã hóa mật khẩu mới
+
+    // Hash new password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    // 5. Cập nhật mật khẩu mới (dùng save() thay vì findByIdAndUpdate)
-    user.password = hashedPassword;
-    user.updateAt = Date.now();
-    await user.save();
+    // Update password
+    await User.update(
+      {
+        password: hashedPassword,
+        updatedAt: new Date(),
+      },
+      { where: { id: userId } }
+    );
 
-    // 6. Trả về thành công
-    res.status(200).json({ message: "Đổi mật khẩu thành công" });
+    // Return success
+    res.status(200).json({ message: "Password changed successfully" });
   } catch (error) {
-    console.error("Lỗi đổi mật khẩu:", error);
-    res.status(500).json({ message: "Lỗi server khi đổi mật khẩu" });
+    console.error("Change password error:", error);
+    res.status(500).json({ message: "Server error while changing password" });
   }
 });
+
 module.exports = router;

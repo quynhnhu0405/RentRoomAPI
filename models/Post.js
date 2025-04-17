@@ -1,61 +1,92 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db");
 
-const PostSchema = new mongoose.Schema(
+const Post = sequelize.define(
+  "Post",
   {
-    title: { type: String, required: true },
-    description: { type: String, required: true },
-    price: { type: Number, required: true },
-    area: { type: Number, required: true },
-    category: {
-      id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Category",
-        required: true,
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    categoryId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    title: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: false,
+    },
+    price: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+    area: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+    address: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    ward: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    district: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    province: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    images: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      get() {
+        const rawValue = this.getDataValue("images");
+        return rawValue ? JSON.parse(rawValue) : [];
       },
-      name: { type: String, required: true },
-    },
-    location: {
-      province: { type: String, required: true },
-      district: { type: String, required: true },
-      ward: { type: String, required: true },
-      street: { type: String, required: false },
-    },
-    utilities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Utility" }],
-    images: [{ type: String }],
-    landlordId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      set(val) {
+        this.setDataValue("images", JSON.stringify(val));
+      },
     },
     status: {
-      type: String,
-      enum: ["unpaid", "waiting", "available", "expired", "rejected"],
-      default: "unpaid",
+      type: DataTypes.ENUM(
+        "pending",
+        "active",
+        "rented",
+        "expired",
+        "rejected"
+      ),
+      defaultValue: "pending",
     },
-    package: [
-      {
-        id: { type: mongoose.Schema.Types.ObjectId, ref: "Package" },
-        period: { type: String, enum: ["day", "week", "month"] },
-        quantity: { type: Number },
-      },
-    
-    ],
-    isVisible: { type: Boolean, default: true },
-    expiryDate: { type: Date, required: true },
+    expiryDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    featured: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    viewCount: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
   },
-  { timestamps: true } // timestamps tự động tạo createdAt & updatedAt
+  {
+    tableName: "posts",
+    timestamps: true,
+  }
 );
-// Virtual cho package
-PostSchema.virtual("packageDetails", {
-  ref: "Package",
-  localField: "package.id",
-  foreignField: "_id",
-  justOne: false,
-});
-// Virtual cho utilities (nếu cần chi tiết)
-PostSchema.virtual("utilityDetails", {
-  ref: "Utilities",
-  localField: "utilities",
-  foreignField: "_id",
-});
-module.exports = mongoose.model("Post", PostSchema);
+
+module.exports = Post;

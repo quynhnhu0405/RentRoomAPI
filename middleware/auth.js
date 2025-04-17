@@ -1,41 +1,44 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
-// Middleware xác thực người dùng
+// Authentication middleware
 const auth = async (req, res, next) => {
   try {
-    // Lấy token từ header
+    // Get token from header
     const token = req.header("Authorization")?.replace("Bearer ", "");
 
     if (!token) {
-      return res.status(401).json({ message: "Không có token xác thực" });
+      return res.status(401).json({ message: "No authentication token" });
     }
 
-    // Xác thực token
+    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Tìm user
-    const user = await User.findById(decoded.id).select("-password");
+    // Find user
+    const user = await User.findOne({
+      where: { id: decoded.id },
+      attributes: { exclude: ["password"] },
+    });
 
     if (!user) {
-      return res.status(401).json({ message: "Không tìm thấy người dùng" });
+      return res.status(401).json({ message: "User not found" });
     }
 
     if (user.status !== "active") {
-      return res.status(403).json({ message: "Tài khoản đã bị khóa" });
+      return res.status(403).json({ message: "Account is locked" });
     }
 
-    // Lưu thông tin user vào request để sử dụng ở các middleware khác
-    req.user = user;
+    // Save user info to request for use in other middleware
+    req.user = user.toJSON();
 
     next();
   } catch (error) {
     console.error("Auth error:", error);
-    res.status(401).json({ message: "Token không hợp lệ" });
+    res.status(401).json({ message: "Invalid token" });
   }
 };
 
-// Middleware kiểm tra quyền admin
+// Admin role check middleware
 const authAdmin = async (req, res, next) => {
   try {
     await auth(req, res, () => {
@@ -44,12 +47,14 @@ const authAdmin = async (req, res, next) => {
       } else {
         res
           .status(403)
-          .json({ message: "Bạn không có quyền thực hiện thao tác này" });
+          .json({
+            message: "You don't have permission to perform this action",
+          });
       }
     });
   } catch (error) {
     console.error("Admin auth error:", error);
-    res.status(401).json({ message: "Xác thực không thành công" });
+    res.status(401).json({ message: "Authentication failed" });
   }
 };
 

@@ -1,25 +1,52 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db");
 
-const paymentSchema = new mongoose.Schema(
+const Payment = sequelize.define(
+  "Payment",
   {
-    PostId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Post",
-      required: true,
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
     },
-    landlordId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
-    total: { type: Number, required: true },
+    packageId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    amount: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
     status: {
-      type: String,
-      enum: ["pending", "completed", "failed"],
-      default: "pending",
+      type: DataTypes.ENUM("pending", "completed", "failed", "refunded"),
+      defaultValue: "pending",
+    },
+    paymentMethod: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    transactionId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    startDate: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    endDate: {
+      type: DataTypes.DATE,
+      allowNull: false,
     },
   },
-  { timestamps: true }
+  {
+    tableName: "payments",
+    timestamps: true,
+  }
 );
 
-module.exports = mongoose.model("Payment", paymentSchema);
+module.exports = Payment;
