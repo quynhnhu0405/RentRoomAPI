@@ -29,7 +29,7 @@ router.get("/", async (req, res) => {
 router.get("/latest-posts", async (req, res) => {
   try {
     // Fetch the latest posts without any ID validation
-    const latestPosts = await Post.find({ isVisible: true })
+    const latestPosts = await Post.find({ isVisible: true, status: "available" })
       .sort({ createdAt: -1 })
       .limit(8)
       .populate("category", "name")

@@ -1,9 +1,11 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { auth } = require("../middleware/auth");
 const router = express.Router();
+
 
 // API đăng ký
 router.post("/register", async (req, res) => {
