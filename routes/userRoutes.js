@@ -126,15 +126,27 @@ router.post("/forgot-password", async (req, res) => {
     res.status(500).json({ error: "Lỗi khi xử lý yêu cầu" });
   }
 });
-
-// API Thêm User (chỉ admin)
+//Tạo user mới
 router.post("/", async (req, res) => {
   try {
-    const newUser = new User(req.body);
+    const { name, phone, password, role, status } = req.body;
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    const newUser = new User({
+      name,
+      phone,
+      password: hashedPassword,
+      role: role || 'user',
+      status: status || 'active'
+    });
+
     await newUser.save();
-    res.status(201).json(newUser);
+    const userResponse = newUser.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({ user: userResponse });
   } catch (error) {
-    res.status(500).json({ error: "Lỗi khi thêm user" });
+    res.status(500).json({ message: "Lỗi khi thêm user" });
   }
 });
 
