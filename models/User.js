@@ -9,6 +9,7 @@ const UserSchema = new mongoose.Schema({
     status: { type: String, enum: ["active", "inactive", "banned"], default: "active" },
     role: { type: String, enum: ["user", "admin"], default: "user"},
     avatar: { type: String, required: false },
+    failedLoginAttempts: { type: Number, default: 0 }
 });
 
 module.exports = mongoose.model("User", UserSchema);

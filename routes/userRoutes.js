@@ -12,6 +12,14 @@ router.post("/register", async (req, res) => {
   try {
     const { name, phone, password } = req.body;
 
+    // Validate password
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
+    if (!passwordRegex.test(password)) {
+      return res.status(400).json({ 
+        message: "Mật khẩu phải có ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt" 
+      });
+    }
+
     // Kiểm tra xem số điện thoại đã tồn tại chưa
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
@@ -64,16 +72,40 @@ router.post("/login", async (req, res) => {
       return res
         .status(400)
         .json({ message: "Số điện thoại hoặc mật khẩu không đúng" });
+    }
 
+    // Kiểm tra tài khoản có bị khóa không
+    if (user.status === "banned") {
+      return res.status(403).json({ 
+        message: "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ tới 0396504803 để biết chi tiết."
+      });
     }
 
     // Kiểm tra mật khẩu
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res
-        .status(400)
-        .json({ message: "Số điện thoại hoặc mật khẩu không đúng" });
+      // Tăng số lần đăng nhập thất bại
+      user.failedLoginAttempts += 1;
+
+      // Nếu đã đạt 5 lần thất bại, khóa tài khoản vĩnh viễn
+      if (user.failedLoginAttempts >= 5) {
+        user.status = "banned";
+        user.failedLoginAttempts = 0;
+        await user.save();
+        return res.status(403).json({ 
+          message: "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ tới 0396504803 để biết chi tiết."
+        });
+      }
+
+      await user.save();
+      return res.status(400).json({ 
+        message: `Mật khẩu không đúng. Bạn còn ${5 - user.failedLoginAttempts} lần thử.`
+      });
     }
+
+    // Reset số lần đăng nhập thất bại khi đăng nhập thành công
+    user.failedLoginAttempts = 0;
+    await user.save();
 
     // Kiểm tra trạng thái tài khoản
     if (user.status !== "active") {
@@ -333,4 +365,41 @@ router.post("/change-password", auth, async (req, res) => {
     res.status(500).json({ message: "Lỗi server khi đổi mật khẩu" });
   }
 });
+
+// API mở khóa tài khoản (chỉ admin)
+router.patch('/:id/unlock', auth, async (req, res) => {
+  try {
+    // Kiểm tra quyền admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Không có quyền thực hiện thao tác này' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { 
+        status: 'active',
+        failedLoginAttempts: 0 
+      },
+      { new: true }
+    );
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    }
+    
+    res.json({ 
+      message: 'Mở khóa tài khoản thành công',
+      user: {
+        id: user._id,
+        name: user.name,
+        phone: user.phone,
+        status: user.status
+      }
+    });
+  } catch (error) {
+    console.error('Error unlocking user account:', error);
+    res.status(500).json({ message: 'Lỗi khi mở khóa tài khoản' });
+  }
+});
+
 module.exports = router;
