@@ -130,8 +130,18 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const { name, phone, password, role, status } = req.body;
+
+    // Kiểm tra password
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      return res.status(400).json({
+        message: "Mật khẩu phải có ít nhất 8 ký tự, bao gồm chữ thường, chữ hoa và số."
+      });
+    }
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+
     const newUser = new User({
       name,
       phone,
@@ -141,14 +151,17 @@ router.post("/", async (req, res) => {
     });
 
     await newUser.save();
+
     const userResponse = newUser.toObject();
     delete userResponse.password;
 
     res.status(201).json({ user: userResponse });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Lỗi khi thêm user" });
   }
 });
+
 
 // API Lấy danh sách users (chỉ admin)
 router.get("/", async (req, res) => {
