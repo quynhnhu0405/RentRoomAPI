@@ -414,6 +414,7 @@ router.post("/", auth, async (req, res) => {
       images,
       package,
       expiryDate,
+      transactionCode,
     } = req.body;
 
     // Kiểm tra category
@@ -451,6 +452,7 @@ router.post("/", auth, async (req, res) => {
       landlordId: req.user._id,
       total: totalPrice, // Use the provided total price or default to 0
       status: "pending", // Payment starts as pending and will be approved by admin
+      transactionCode,
     });
 
     await newPayment.save();
@@ -628,7 +630,7 @@ router.put("/:postId/renew", auth, async (req, res) => {
   try {
     const { postId } = req.params;
     const userId = req.user._id;
-    const { package: packageArr, expiryDate } = req.body;
+    const { package: packageArr, expiryDate,transactionCode } = req.body;
 
     // Kiểm tra tồn tại bài đăng
     const post = await Post.findById(postId);
@@ -706,6 +708,7 @@ router.put("/:postId/renew", auth, async (req, res) => {
       landlordId: userId,
       total: totalPrice,
       status: "pending",
+      transactionCode,
     });
 
     await newPayment.save();
