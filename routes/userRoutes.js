@@ -4,13 +4,30 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { auth } = require("../middleware/auth");
+const { sendOTPEmail, logger } = require("../config/emailConfig");
+const OTPService = require("../services/otpService");
+const rateLimit = require("express-rate-limit");
 const router = express.Router();
 
+// Lưu trữ OTP tạm thời (trong thực tế nên dùng Redis)
+const otpStore = new Map();
+
+// Hàm tạo OTP ngẫu nhiên
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// Rate limiting cho API đăng nhập và quên mật khẩu
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 phút
+  max: 5, // Giới hạn 5 request mỗi IP trong 15 phút
+  message: { message: "Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau 15 phút" }
+});
 
 // API đăng ký
 router.post("/register", async (req, res) => {
   try {
-    const { name, phone, password } = req.body;
+    const { name, phone, email, password } = req.body;
 
     // Validate password
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
@@ -20,10 +37,23 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Kiểm tra xem số điện thoại đã tồn tại chưa
-    const existingUser = await User.findOne({ phone });
+    // Validate email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Email không hợp lệ" });
+    }
+
+    // Kiểm tra xem số điện thoại hoặc email đã tồn tại chưa
+    const existingUser = await User.findOne({ 
+      $or: [{ phone }, { email }] 
+    });
     if (existingUser) {
-      return res.status(400).json({ message: "Số điện thoại đã được sử dụng" });
+      if (existingUser.phone === phone) {
+        return res.status(400).json({ message: "Số điện thoại đã được sử dụng" });
+      }
+      if (existingUser.email === email) {
+        return res.status(400).json({ message: "Email đã được sử dụng" });
+      }
     }
 
     // Mã hóa mật khẩu
@@ -34,6 +64,7 @@ router.post("/register", async (req, res) => {
     const newUser = new User({
       name,
       phone,
+      email,
       password: hashedPassword,
     });
 
@@ -52,11 +83,15 @@ router.post("/register", async (req, res) => {
         id: newUser._id,
         name: newUser.name,
         phone: newUser.phone,
+        email: newUser.email,
         role: newUser.role,
       },
     });
   } catch (error) {
     console.error("Lỗi đăng ký:", error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ error: "Lỗi khi đăng ký tài khoản" });
   }
 });
@@ -105,6 +140,22 @@ router.post("/login", async (req, res) => {
 
     // Reset số lần đăng nhập thất bại khi đăng nhập thành công
     user.failedLoginAttempts = 0;
+
+    // Nếu tài khoản chưa có email, yêu cầu cập nhật
+    if (!user.email) {
+      return res.status(200).json({
+        token: null,
+        user: {
+          id: user._id,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          requireEmail: true
+        },
+        message: "Vui lòng cập nhật email của bạn để tiếp tục sử dụng tài khoản"
+      });
+    }
+
     await user.save();
 
     // Kiểm tra trạng thái tài khoản
@@ -125,6 +176,7 @@ router.post("/login", async (req, res) => {
         id: user._id,
         name: user.name,
         phone: user.phone,
+        email: user.email,
         role: user.role,
       },
     });
@@ -135,29 +187,87 @@ router.post("/login", async (req, res) => {
 });
 
 // API quên mật khẩu
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", authLimiter, async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { email } = req.body;
 
-    // Kiểm tra user tồn tại
-    const user = await User.findOne({ phone });
+    // Kiểm tra email tồn tại
+    const user = await User.findOne({ email });
     if (!user) {
-      return res
-        .status(404)
-        .json({ message: "Không tìm thấy tài khoản với số điện thoại này" });
+      return res.status(404).json({ message: "Không tìm thấy tài khoản với email này" });
     }
 
-    // Trong thực tế, gửi mã xác nhận qua SMS hoặc email
-    // Ở đây tạm thời trả về thành công
+    // Kiểm tra giới hạn yêu cầu OTP
+    const limitCheck = await OTPService.checkRequestLimit(email);
+    if (!limitCheck.allowed) {
+      return res.status(429).json({ message: limitCheck.message });
+    }
 
-    res
-      .status(200)
-      .json({ message: "Vui lòng kiểm tra tin nhắn để đặt lại mật khẩu" });
+    // Tạo OTP mới
+    const otp = await OTPService.generateOTP(email);
+
+    // Gửi OTP qua email (bất đồng bộ)
+    sendOTPEmail(email, otp)
+      .then(() => {
+        logger.info('OTP email sent successfully', { email });
+      })
+      .catch(error => {
+        logger.error('Failed to send OTP email', { email, error: error.message });
+      });
+
+    // Trả về response ngay lập tức
+    res.status(200).json({ 
+      message: "Mã xác thực đã được gửi đến email của bạn",
+      email: email
+    });
   } catch (error) {
-    console.error("Lỗi quên mật khẩu:", error);
+    logger.error("Lỗi quên mật khẩu:", { error: error.message });
     res.status(500).json({ error: "Lỗi khi xử lý yêu cầu" });
   }
 });
+
+// API xác thực OTP và đặt lại mật khẩu
+router.post("/reset-password", authLimiter, async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    // Kiểm tra OTP
+    const otpCheck = await OTPService.verifyOTP(email, otp);
+    if (!otpCheck.valid) {
+      return res.status(400).json({ message: otpCheck.message });
+    }
+
+    // Validate password
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ 
+        message: "Mật khẩu phải có ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt" 
+      });
+    }
+
+    // Tìm user và cập nhật mật khẩu
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "Không tìm thấy tài khoản" });
+    }
+
+    // Mã hóa mật khẩu mới
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Cập nhật mật khẩu
+    user.password = hashedPassword;
+    user.updateAt = Date.now();
+    await user.save();
+
+    logger.info('Password reset successful', { email });
+    res.status(200).json({ message: "Đặt lại mật khẩu thành công" });
+  } catch (error) {
+    logger.error("Lỗi đặt lại mật khẩu:", { error: error.message });
+    res.status(500).json({ error: "Lỗi khi đặt lại mật khẩu" });
+  }
+});
+
 //Tạo user mới
 router.post("/", async (req, res) => {
   try {

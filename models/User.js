@@ -3,6 +3,17 @@ const mongoose = require("mongoose");
 const UserSchema = new mongoose.Schema({
     name: { type: String, required: true },
     phone: { type: String, required: true, unique: true },
+    email: { 
+        type: String, 
+        required: true, 
+        unique: true,
+        validate: {
+            validator: function(v) {
+                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+            },
+            message: props => `${props.value} không phải là email hợp lệ!`
+        }
+    },
     password: { type: String, required: true },
     createAt: { type: Date, required: true, default: Date.now },
     updateAt: { type: Date, required: true, default: Date.now },
