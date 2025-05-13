@@ -412,18 +412,21 @@ router.post("/", auth, async (req, res) => {
       location,
       utilities,
       images,
-      package,
+      package: selectedPackageList,
       expiryDate,
       transactionCode,
     } = req.body;
-
     // Kiểm tra category
     const categoryExists = await Category.findById(category.id);
     if (!categoryExists) {
       return res.status(400).json({ message: "Danh mục không tồn tại" });
     }
-
-    const packageExists = await Package.findById(package[0].id);
+    // Validate package list
+    if (!selectedPackageList || !Array.isArray(selectedPackageList) || !selectedPackageList[0]?.id) {
+      return res.status(400).json({ error: "Dữ liệu gói không hợp lệ" });
+    }
+    
+    const packageExists = await Package.findById(selectedPackageList[0].id);
 
     // Tạo bài đăng mới với landlordId là ID của user đang đăng nhập
     const newPost = new Post({
@@ -436,14 +439,14 @@ router.post("/", auth, async (req, res) => {
       utilities,
       images,
       landlordId: req.user._id,
-      package,
+      package: selectedPackageList,
       expiryDate,
-      status: "unpaid", // Mặc định là chưa thanh toán
+      status: "unpaid",
     });
 
     await newPost.save();
     const totalPrice = packageExists
-      ? packageExists[`price${package[0].period}`] * package[0].quantity
+      ? packageExists[`price${selectedPackageList[0].period}`] * selectedPackageList[0].quantity
       : 0;
 
     // Automatically create a payment record in pending status
