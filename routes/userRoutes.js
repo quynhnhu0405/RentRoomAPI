@@ -336,7 +336,7 @@ router.get("/user/:id", async (req, res) => {
     }
 });
 
-router.get("/my-profile", auth, async (req, res) => {
+router.get("/my-profile",auth, async (req, res) => {
   try {
 
     const user = await User.findById(req.user.id);
@@ -424,21 +424,31 @@ router.get('/count', async (req, res) => {
   }
 });
 // Sửa thông tin tài khoản
-router.put("/:id",auth, async (req, res) => {
+router.put("/:id", auth, async (req, res) => {
   try {
-    const { name, phone, avatar } = req.body;
+    const { name, phone, avatar, email } = req.body;
 
-    const existingUser = await User.findOne({ phone });
-    if (existingUser && existingUser._id.toString() !== req.params.id) {
+    // Tìm user khác đang dùng cùng số điện thoại
+    const existingUser = await User.findOne({ phone, _id: { $ne: req.params.id } });
+    if (existingUser) {
       return res.status(400).json({ message: "Số điện thoại đã tồn tại!" });
     }
+
+    // Tìm user khác đang dùng cùng email
+    const existingEmailUser = await User.findOne({ email, _id: { $ne: req.params.id } });
+    if (existingEmailUser) {
+      return res.status(400).json({ message: "Email đã tồn tại!" });
+    }
+
+    // Cập nhật thông tin người dùng
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
       {
         name,
         phone,
         avatar,
-        updateAt: Date.now(),
+        email,
+        updatedAt: Date.now(),
       },
       { new: true }
     );
@@ -449,6 +459,7 @@ router.put("/:id",auth, async (req, res) => {
     res.status(500).json({ message: "Lỗi server" });
   }
 });
+
 // API đổi mật khẩu
 router.post("/change-password", auth, async (req, res) => {
   try {
