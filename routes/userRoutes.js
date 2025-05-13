@@ -431,7 +431,7 @@ router.put("/:id", auth, async (req, res) => {
     // Tìm user khác đang dùng cùng số điện thoại
     const existingUser = await User.findOne({ phone, _id: { $ne: req.params.id } });
     if (existingUser) {
-      return res.status(400).json({ message: "Số điện thoại đã tồn tại!" });
+      return res.status(400).json({ message: "Số điện thoại đã tồn tại addadaddad!" });
     }
 
     // Tìm user khác đang dùng cùng email
